@@ -5,7 +5,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/ctz168/muside/main/install.sh | bash
 #
 # Works on: Termux, proot Ubuntu, Ubuntu/Debian, Fedora, CentOS, macOS, Alpine, Arch Linux
-# Installs: Python 3, pip, flask, flask-cors, clones repo, launches server
+# Installs: Python 3, venv, all pip deps (flask, torch, demucs, whisper), clones repo, launches server
 
 # NOTE: We intentionally do NOT use 'set -e' here.
 # 'set -e' causes the script to exit silently on any command failure,
@@ -116,7 +116,7 @@ install_packages() {
     esac
 }
 
-# ── Step 1/5: Install Python ─────────────────────────────
+# ── Step 1/5: Install Python + venv ─────────────────────
 echo -e "${BLUE}[1/5]${NC} Checking Python..."
 
 if command -v python3 &>/dev/null && python3 -c "import sys; exit(0 if sys.version_info >= (3,8) else 1)" 2>/dev/null; then
@@ -153,131 +153,103 @@ else
         fail "Python installation failed — please install Python 3.8+ manually"
         echo ""
         info "Try:"
-        echo -e "  ${CYAN}apt-get install python3 python3-pip${NC}  (proot/debian)"
+        echo -e "  ${CYAN}apt-get install python3 python3-pip python3-venv${NC}  (proot/debian)"
         echo -e "  ${CYAN}pkg install python python-pip${NC}      (Termux)"
         exit 1
     fi
 fi
 
-# ── Step 2/5: Install pip + dependencies ────────────────
+# ── Step 2/5: Create venv + install ALL dependencies ─────
 echo ""
-echo -e "${BLUE}[2/5]${NC} Installing dependencies..."
+echo -e "${BLUE}[2/5]${NC} Setting up Python environment & installing dependencies..."
 
-# Ensure pip
-if ! $PYTHON -m pip --version &>/dev/null 2>&1; then
-    info "Installing pip..."
+# Ensure python3-venv is available (Debian/Ubuntu need it explicitly)
+if ! $PYTHON -c "import venv" 2>/dev/null; then
+    info "python3-venv not found, installing..."
     case "$PLATFORM" in
-        termux)
-            pkg install -y python-pip || true
-            ;;
-        proot)
-            apt-get install -y python3-pip || \
-            curl -sS https://bootstrap.pypa.io/get-pip.py | $PYTHON || \
-            $PYTHON -m ensurepip --upgrade || true
-            ;;
-        macos)
-            # pip should come with python on macOS
-            ;;
-        *)
-            curl -sS https://bootstrap.pypa.io/get-pip.py | $PYTHON || \
-            $PYTHON -m ensurepip --upgrade || true
-            ;;
+        termux)  pkg install -y python-pip 2>/dev/null ;;
+        proot)   apt-get install -y python3-venv 2>/dev/null ;;
+        debian)  install_packages debian python3-venv ;;
+        fedora)  install_packages fedora python3-virtualenv ;;
+        centos)  install_packages centos python3-virtualenv ;;
+        alpine)  install_packages alpine py3-virtualenv ;;
+        *)       true ;;  # macOS and others usually have venv built-in
     esac
 fi
 
-if ! $PYTHON -m pip --version &>/dev/null 2>&1; then
-    warn "pip not available — trying alternative install..."
-fi
+# ── Create virtual environment ──
+VENV_DIR="$INSTALL_DIR/.venv"
 
-# Install flask + flask-cors
-# Use --break-system-packages on Debian/Ubuntu 12+ and proot where externally managed env blocks pip
-FLASK_OK=false
-if [ "$PLATFORM" = "debian" ] || [ "$PLATFORM" = "proot" ] || [ "$PLATFORM" = "alpine" ]; then
-    $PYTHON -m pip install --break-system-packages flask flask-cors 2>&1 && FLASK_OK=true
-    if ! $FLASK_OK; then
-        $PYTHON -m pip install flask flask-cors 2>&1 && FLASK_OK=true
-    fi
-    if ! $FLASK_OK; then
-        $PYTHON -m pip install --user flask flask-cors 2>&1 && FLASK_OK=true
-    fi
+# If venv already exists, just activate it
+if [ -d "$VENV_DIR" ] && [ -f "$VENV_DIR/bin/python3" ]; then
+    info "Using existing virtual environment at $VENV_DIR"
 else
-    $PYTHON -m pip install flask flask-cors 2>&1 && FLASK_OK=true
-    if ! $FLASK_OK; then
-        $PYTHON -m pip install --user flask flask-cors 2>&1 && FLASK_OK=true
-    fi
+    # Create venv (dir may not exist yet if we haven't cloned, use tmp location)
+    VENV_TMP="$HOME/.muside-venv"
+    info "Creating virtual environment (avoids PEP 668 pip restrictions)..."
+    $PYTHON -m venv "$VENV_TMP" 2>&1 || {
+        # Fallback: try with --system-site-packages
+        $PYTHON -m venv --system-site-packages "$VENV_TMP" 2>&1 || {
+            fail "Cannot create virtual environment. Please install python3-venv:"
+            echo -e "  ${CYAN}apt-get install python3-venv${NC}  (Debian/Ubuntu)"
+            exit 1
+        }
+    }
+    # Will move to INSTALL_DIR/.venv after clone
+    VENV_DIR="$VENV_TMP"
 fi
 
-if $FLASK_OK; then
+# Activate venv
+source "$VENV_DIR/bin/activate" || {
+    fail "Cannot activate virtual environment"
+    exit 1
+}
+ok "Virtual environment activated"
+
+# Upgrade pip in venv
+pip install --upgrade pip --quiet 2>/dev/null
+
+# ── Install core dependencies (flask, flask-cors) ──
+info "Installing core dependencies (flask, flask-cors)..."
+pip install flask flask-cors 2>&1
+if python3 -c "import flask" 2>/dev/null; then
     ok "flask + flask-cors"
 else
-    warn "pip install may have failed — will verify in Step 4"
+    fail "Failed to install flask — check your network connection"
+    exit 1
 fi
 
-# ── Install audio analysis dependencies (torch, demucs, whisper) ──
-# These are needed for smart stem separation + lyrics transcription
+# ── Install audio analysis dependencies ──
 info "Installing audio analysis dependencies (may take a few minutes)..."
 
-AUDIO_OK=true
-AUDIO_PKGS="torch torchaudio demucs openai-whisper"
+# Install PyTorch (CPU version — much smaller than GPU version)
+info "Installing PyTorch (CPU version, ~200MB)..."
+pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu 2>&1 || \
+pip install torch torchaudio 2>&1 || \
+warn "torch/torchaudio install failed — audio analysis will be limited"
 
-# Install torch first (CPU-only to save disk space and download time)
-info "Installing PyTorch (CPU version)..."
-if [ "$PLATFORM" = "debian" ] || [ "$PLATFORM" = "proot" ] || [ "$PLATFORM" = "alpine" ]; then
-    $PYTHON -m pip install --break-system-packages torch torchaudio --index-url https://download.pytorch.org/whl/cpu 2>&1 || \
-    $PYTHON -m pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu 2>&1 || \
-    $PYTHON -m pip install --user torch torchaudio --index-url https://download.pytorch.org/whl/cpu 2>&1 || {
-        warn "CPU-only torch install failed, trying standard package..."
-        $PYTHON -m pip install --break-system-packages torch torchaudio 2>&1 || \
-        $PYTHON -m pip install torch torchaudio 2>&1 || \
-        $PYTHON -m pip install --user torch torchaudio 2>&1 || AUDIO_OK=false
-    }
+if python3 -c "import torch" 2>/dev/null; then
+    ok "torch $(python3 -c 'import torch; print(torch.__version__)' 2>/dev/null) + torchaudio"
 else
-    $PYTHON -m pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu 2>&1 || \
-    $PYTHON -m pip install torch torchaudio 2>&1 || \
-    $PYTHON -m pip install --user torch torchaudio 2>&1 || AUDIO_OK=false
+    warn "torch not installed — audio analysis will be limited"
 fi
 
-if $AUDIO_OK && $PYTHON -c "import torch" 2>/dev/null; then
-    ok "torch + torchaudio"
+# Install Demucs (stem separation)
+info "Installing Demucs (stem separation)..."
+pip install demucs 2>&1 || warn "demucs install failed — stem separation unavailable"
+if python3 -c "from demucs.pretrained import get_model" 2>/dev/null; then
+    ok "demucs (stem separation)"
 else
-    warn "torch/torchaudio install failed — audio analysis will be limited"
-    AUDIO_OK=false
+    warn "demucs not installed — stem separation unavailable"
 fi
 
-# Install demucs for stem separation
-if $AUDIO_OK; then
-    info "Installing Demucs (stem separation)..."
-    if [ "$PLATFORM" = "debian" ] || [ "$PLATFORM" = "proot" ] || [ "$PLATFORM" = "alpine" ]; then
-        $PYTHON -m pip install --break-system-packages demucs 2>&1 || \
-        $PYTHON -m pip install demucs 2>&1 || \
-        $PYTHON -m pip install --user demucs 2>&1 || true
-    else
-        $PYTHON -m pip install demucs 2>&1 || \
-        $PYTHON -m pip install --user demucs 2>&1 || true
-    fi
-    if $PYTHON -c "from demucs.pretrained import get_model" 2>/dev/null; then
-        ok "demucs (stem separation)"
-    else
-        warn "demucs install failed — stem separation unavailable"
-    fi
-fi
-
-# Install openai-whisper for lyrics transcription
-if $AUDIO_OK; then
-    info "Installing Whisper (lyrics transcription)..."
-    if [ "$PLATFORM" = "debian" ] || [ "$PLATFORM" = "proot" ] || [ "$PLATFORM" = "alpine" ]; then
-        $PYTHON -m pip install --break-system-packages openai-whisper 2>&1 || \
-        $PYTHON -m pip install openai-whisper 2>&1 || \
-        $PYTHON -m pip install --user openai-whisper 2>&1 || true
-    else
-        $PYTHON -m pip install openai-whisper 2>&1 || \
-        $PYTHON -m pip install --user openai-whisper 2>&1 || true
-    fi
-    if $PYTHON -c "import whisper" 2>/dev/null; then
-        ok "openai-whisper (lyrics transcription)"
-    else
-        warn "whisper install failed — lyrics transcription unavailable"
-    fi
+# Install openai-whisper (lyrics transcription)
+info "Installing Whisper (lyrics transcription)..."
+pip install openai-whisper 2>&1 || warn "whisper install failed — lyrics transcription unavailable"
+if python3 -c "import whisper" 2>/dev/null; then
+    ok "openai-whisper (lyrics transcription)"
+else
+    warn "whisper not installed — lyrics transcription unavailable"
 fi
 
 # ── Git clone with retry + mirror fallback ───────────
@@ -359,90 +331,53 @@ else
     fi
 fi
 
-# ── Step 4/5: Final verification in target environment ──
+# Move venv to INSTALL_DIR if it was created in tmp location
+VENV_TMP="$HOME/.muside-venv"
+FINAL_VENV="$INSTALL_DIR/.venv"
+if [ -d "$VENV_TMP" ] && [ ! -d "$FINAL_VENV" ]; then
+    mv "$VENV_TMP" "$FINAL_VENV"
+    VENV_DIR="$FINAL_VENV"
+    info "Moved venv to $VENV_DIR"
+    # Re-activate from new location
+    deactivate 2>/dev/null
+    source "$VENV_DIR/bin/activate"
+fi
+
+# ── Step 4/5: Final verification ──────────────────────────
 echo ""
 echo -e "${BLUE}[4/5]${NC} Verifying in target environment..."
 
-# Re-check flask import with the actual python3 that will run the server
-VERIFY_FAILED=false
-if ! python3 -c "import flask" 2>/dev/null; then
-    info "flask not found in current python3 — installing..."
-    if command -v pip3 &>/dev/null; then
-        pip3 install --break-system-packages flask flask-cors 2>&1 || \
-        pip3 install flask flask-cors 2>&1 || \
-        pip3 install --user flask flask-cors 2>&1 || VERIFY_FAILED=true
-    elif command -v pip &>/dev/null; then
-        pip install --break-system-packages flask flask-cors 2>&1 || \
-        pip install flask flask-cors 2>&1 || \
-        pip install --user flask flask-cors 2>&1 || VERIFY_FAILED=true
-    else
-        # Try via python3 -m pip
-        python3 -m pip install --break-system-packages flask flask-cors 2>&1 || \
-        python3 -m pip install flask flask-cors 2>&1 || \
-        { python3 -m ensurepip 2>/dev/null && python3 -m pip install flask flask-cors 2>&1; } || \
-        VERIFY_FAILED=true
-    fi
-    if $VERIFY_FAILED; then
-        # Last resort: apt-get (works in proot Ubuntu and regular Debian)
-        info "Trying apt-get as fallback..."
-        if command -v apt-get &>/dev/null; then
-            if need_sudo; then
-                sudo apt-get update -qq 2>/dev/null
-                sudo apt-get install -y python3-flask python3-flask-cors 2>/dev/null || \
-                { sudo apt-get install -y python3-pip 2>/dev/null && pip3 install flask flask-cors 2>/dev/null; } || \
-                    warn "Could not install flask automatically"
-            else
-                apt-get update -qq 2>/dev/null
-                apt-get install -y python3-flask python3-flask-cors 2>/dev/null || \
-                { apt-get install -y python3-pip 2>/dev/null && pip3 install flask flask-cors 2>/dev/null; } || \
-                    warn "Could not install flask automatically"
-            fi
-        else
-            warn "Could not install flask automatically"
-        fi
-    else
-        ok "flask installed"
-    fi
-else
-    ok "flask $(python3 -c 'import flask; print(flask.__version__)' 2>/dev/null)"
-fi
+cd "$INSTALL_DIR" || {
+    fail "Cannot cd to $INSTALL_DIR"
+    exit 1
+}
 
-if ! python3 -c "import flask_cors" 2>/dev/null; then
-    info "flask-cors missing — installing..."
-    pip3 install --break-system-packages flask-cors 2>/dev/null || \
-    pip3 install flask-cors 2>/dev/null || \
-    python3 -m pip install flask-cors 2>/dev/null || true
-fi
-
-# Final smoke test
-SMOKE_OK=false
+# Core dependencies
 if python3 -c "from flask import Flask; from flask_cors import CORS; print('OK')" 2>/dev/null; then
-    ok "Core dependencies ready"
-    SMOKE_OK=true
+    ok "Core dependencies: flask $(python3 -c 'import flask; print(flask.__version__)' 2>/dev/null)"
 else
-    warn "Flask import still fails — you may need to run:"
-    echo -e "  ${CYAN}pip3 install flask flask-cors${NC}"
-    echo ""
+    warn "Flask import fails — installing in venv..."
+    pip install flask flask-cors 2>&1 || warn "Could not install flask automatically"
 fi
 
-# Verify audio analysis dependencies
+# Audio analysis dependencies
 AUDIO_CHECK_OK=true
 if python3 -c "import torch" 2>/dev/null; then
-    ok "torch: $(python3 -c 'import torch; print(torch.__version__)' 2>/dev/null)"
+    ok "torch $(python3 -c 'import torch; print(torch.__version__)' 2>/dev/null)"
 else
     warn "torch not installed — audio analysis will be limited"
     AUDIO_CHECK_OK=false
 fi
 
 if python3 -c "from demucs.pretrained import get_model" 2>/dev/null; then
-    ok "demucs: stem separation ready"
+    ok "demucs (stem separation)"
 else
     warn "demucs not installed — stem separation unavailable"
     AUDIO_CHECK_OK=false
 fi
 
 if python3 -c "import whisper" 2>/dev/null; then
-    ok "whisper: lyrics transcription ready"
+    ok "whisper (lyrics transcription)"
 else
     warn "whisper not installed — lyrics transcription unavailable"
     AUDIO_CHECK_OK=false
@@ -452,7 +387,7 @@ if $AUDIO_CHECK_OK; then
     ok "Audio analysis: fully enabled (stem separation + lyrics transcription)"
 else
     warn "Audio analysis: partially available. For full features, run:"
-    echo -e "  ${CYAN}pip3 install torch torchaudio demucs openai-whisper${NC}"
+    echo -e "  ${CYAN}source $VENV_DIR/bin/activate && pip install torch torchaudio demucs openai-whisper${NC}"
 fi
 
 # Create workspace & config dirs
@@ -464,12 +399,6 @@ ok "Ready at $INSTALL_DIR"
 # ── Step 5/5: Auto-start server & open browser ──────────
 echo ""
 echo -e "${BLUE}[5/5]${NC} Launching MusIDE IDE..."
-
-cd "$INSTALL_DIR" || {
-    fail "Cannot cd to $INSTALL_DIR"
-    info "Try manually: cd $INSTALL_DIR && python3 muside_server.py"
-    exit 1
-}
 
 # Detect local IP for display
 LOCAL_IP=""
@@ -572,6 +501,7 @@ echo ""
 echo -e "  Local:    ${CYAN}${IDE_LOCAL}${NC}"
 echo -e "  Network:  ${CYAN}${IDE_URL}${NC}"
 echo -e "  Dir:      ${CYAN}${INSTALL_DIR}${NC}"
+echo -e "  Venv:     ${CYAN}${VENV_DIR}${NC}"
 echo ""
 echo -e "  ${YELLOW}Press Ctrl+C to stop the server${NC}"
 echo ""
@@ -587,12 +517,13 @@ if ! python3 muside_server.py; then
     fail "Server exited with code $EXIT_CODE"
     echo ""
     info "Possible reasons:"
-    echo "  1. Flask is not installed correctly"
+    echo "  1. Flask is not installed correctly in venv"
     echo "  2. Port $IDE_PORT is already in use"
     echo "  3. Python version is too old (need 3.8+)"
     echo ""
     info "Try these commands:"
-    echo -e "  ${CYAN}pip3 install --break-system-packages flask flask-cors${NC}"
+    echo -e "  ${CYAN}source $VENV_DIR/bin/activate${NC}"
+    echo -e "  ${CYAN}pip install flask flask-cors${NC}"
     echo -e "  ${CYAN}cd $INSTALL_DIR && python3 muside_server.py${NC}"
     echo ""
     exit $EXIT_CODE

@@ -6,14 +6,44 @@ PORT=${1:-12346}
 HOST="0.0.0.0"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VENV_DIR="$SCRIPT_DIR/.venv"
 
-# Activate virtual environment if exists
-if [ -f "$HOME/muside_workspace/.venv/bin/activate" ]; then
-    source "$HOME/muside_workspace/.venv/bin/activate"
-    echo "[INFO] Activated virtual environment"
+# ── Setup virtual environment (avoids PEP 668 externally-managed-environment errors) ──
+if [ ! -d "$VENV_DIR" ] || [ ! -f "$VENV_DIR/bin/python3" ]; then
+    echo "[INFO] Creating virtual environment..."
+    python3 -m venv "$VENV_DIR" 2>/dev/null || {
+        # venv module might need python3-venv package
+        echo "[INFO] venv module not found, installing python3-venv..."
+        if command -v apt-get &>/dev/null; then
+            apt-get update -qq 2>/dev/null
+            apt-get install -y python3-venv 2>/dev/null
+        fi
+        python3 -m venv "$VENV_DIR" || {
+            echo "[ERROR] Cannot create virtual environment. Please run:"
+            echo "  apt-get install python3-venv"
+            echo "  python3 -m venv $VENV_DIR"
+            exit 1
+        }
+    }
 fi
 
-# ── Check and install audio analysis dependencies if missing ──
+# Activate virtual environment
+source "$VENV_DIR/bin/activate"
+echo "[INFO] Virtual environment activated: $VENV_DIR"
+
+# Upgrade pip in venv
+pip install --upgrade pip --quiet 2>/dev/null
+
+# ── Install core dependencies in venv ──
+if ! python3 -c "import flask" 2>/dev/null; then
+    echo "[INFO] Installing core dependencies (flask, flask-cors)..."
+    pip install flask flask-cors 2>/dev/null || {
+        echo "[ERROR] Failed to install core dependencies"
+        exit 1
+    }
+fi
+
+# ── Check and install audio analysis dependencies ──
 echo "[INFO] Checking audio analysis dependencies..."
 MISSING_PKGS=""
 
@@ -30,16 +60,20 @@ fi
 if [ -n "$MISSING_PKGS" ]; then
     echo "[INFO] Installing missing audio analysis dependencies:$MISSING_PKGS"
     echo "[INFO] This may take a few minutes on first run..."
+
     # Install torch with CPU-only index first for smaller download
     if echo "$MISSING_PKGS" | grep -q "torch"; then
-        pip3 install torch torchaudio --index-url https://download.pytorch.org/whl/cpu 2>/dev/null || \
-        pip3 install torch torchaudio 2>/dev/null || \
+        echo "[INFO] Installing PyTorch (CPU version)..."
+        pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu 2>/dev/null || \
+        pip install torch torchaudio 2>/dev/null || \
         echo "[WARN] torch/torchaudio install failed — audio analysis will be limited"
         # Remove torch from missing list
         MISSING_PKGS=$(echo "$MISSING_PKGS" | sed 's/torch//g; s/torchaudio//g')
     fi
-    if [ -n "$MISSING_PKGS" ]; then
-        pip3 install $MISSING_PKGS 2>/dev/null || \
+
+    # Install remaining packages (demucs, whisper)
+    if [ -n "$(echo $MISSING_PKGS | xargs)" ]; then
+        pip install $MISSING_PKGS 2>/dev/null || \
         echo "[WARN] Some dependencies failed to install — audio analysis may be limited"
     fi
 else

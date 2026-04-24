@@ -1,10 +1,10 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    PhoneIDE IDE - One-line installer for Windows (fully automated)
+    MusIDE IDE - One-line installer for Windows (fully automated)
 .DESCRIPTION
-    Installs Python 3, pip dependencies, clones repo, starts server,
-    checks port, opens browser. One command, ready to use.
+    Installs Python 3, creates venv, installs all pip dependencies (flask, torch, demucs, whisper),
+    clones repo, starts server, checks port, opens browser. One command, ready to use.
 .EXAMPLE
     irm https://raw.githubusercontent.com/ctz168/muside/main/install.ps1 | iex
 .EXAMPLE
@@ -103,40 +103,47 @@ if (-not $Python) {
 $pyVer = & $Python --version 2>&1
 Write-OK $pyVer
 
-# ── Step 2: Install pip + dependencies ──────────────────
+# ── Step 2: Create venv + install ALL dependencies ──────
 Write-Host ""
-Write-Host "[2/5] Installing dependencies..." -ForegroundColor Blue
+Write-Host "[2/5] Setting up Python environment & installing dependencies..." -ForegroundColor Blue
 
-# Ensure pip
-& $Python -m pip --version 2>$null | Out-Null
-if ($LASTEXITCODE -ne 0) {
-    Write-Info "Installing pip..."
-    & $Python -m ensurepip --upgrade 2>$null | Out-Null
+# Create venv in install dir
+$VenvDir = "$InstallDir\.venv"
+
+if (-not (Test-Path "$VenvDir\Scripts\python.exe")) {
+    Write-Info "Creating virtual environment..."
+    & $Python -m venv $VenvDir 2>$null
     if ($LASTEXITCODE -ne 0) {
-        $getPip = "$env:TEMP\get-pip.py"
-        try {
-            Invoke-WebRequest -Uri "https://bootstrap.pypa.io/get-pip.py" -OutFile $getPip -UseBasicParsing
-            & $Python $getPip
-            Remove-Item $getPip -Force -ErrorAction SilentlyContinue
-        } catch {
-            Write-Warn "pip install failed"
-        }
+        Write-Info "venv creation failed, trying with --system-site-packages..."
+        & $Python -m venv --system-site-packages $VenvDir 2>$null
     }
 }
 
-# Install flask + flask-cors
-& $Python -m pip install flask flask-cors --quiet 2>$null
-if ($LASTEXITCODE -ne 0) {
-    & $Python -m pip install --user flask flask-cors --quiet 2>$null
+# Use venv python for all subsequent operations
+$VenvPython = "$VenvDir\Scripts\python.exe"
+$VenvPip = "$VenvDir\Scripts\pip.exe"
+
+if (Test-Path $VenvPython) {
+    Write-OK "Virtual environment created at $VenvDir"
+    $Python = $VenvPython
+} else {
+    Write-Warn "venv creation failed, using system Python"
 }
+
+# Upgrade pip
+& $Python -m pip install --upgrade pip --quiet 2>$null
+
+# Install core dependencies (flask, flask-cors)
+Write-Info "Installing core dependencies (flask, flask-cors)..."
+& $Python -m pip install flask flask-cors --quiet 2>$null
 if ($LASTEXITCODE -eq 0) {
     Write-OK "flask + flask-cors"
 } else {
-    Write-Warn "pip install failed - try: $Python -m pip install flask flask-cors"
+    Write-Fail "Failed to install flask - check your network connection"
+    exit 1
 }
 
 # ── Install audio analysis dependencies ──
-# These are needed for smart stem separation + lyrics transcription
 Write-Info "Installing audio analysis dependencies (may take a few minutes)..."
 
 # Install PyTorch (CPU version to save disk space)
@@ -207,7 +214,7 @@ if (Test-Path "$InstallDir\.git") {
         exit 1
     }
 
-    # Clone with mirror fallback (same as Linux install.sh)
+    # Clone with mirror fallback
     $CloneUrls = @(
         "https://github.com/ctz168/muside.git",
         "https://ghfast.top/https://github.com/ctz168/muside.git",
@@ -248,44 +255,33 @@ if (Test-Path "$InstallDir\.git") {
     }
 }
 
+# Move venv if it was created before clone
+$TmpVenv = "$env:USERPROFILE\.muside-venv"
+if ((Test-Path $TmpVenv) -and -not (Test-Path "$InstallDir\.venv")) {
+    Move-Item $TmpVenv "$InstallDir\.venv" -Force
+    $VenvDir = "$InstallDir\.venv"
+    $VenvPython = "$VenvDir\Scripts\python.exe"
+    if (Test-Path $VenvPython) { $Python = $VenvPython }
+}
+
 # Create dirs
 New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\muside_workspace" | Out-Null
 New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.muside" | Out-Null
 
 Write-OK "Ready at $InstallDir"
 
-# ── Step 4: Verify dependencies in target environment ──
+# ── Step 4: Verify dependencies ──
 Write-Host ""
 Write-Host "[4/5] Verifying in target environment..." -ForegroundColor Blue
 
 Push-Location $InstallDir
-$VerifyFailed = $false
-
 try {
-    $flaskCheck = & $Python -c "import flask; print(flask.__version__)" 2>&1
-    if ($LASTEXITCODE -eq 0) {
-        Write-OK "flask $flaskCheck"
-    } else {
-        Write-Info "flask not found - installing..."
-        & $Python -m pip install flask --quiet 2>$null
-        if ($LASTEXITCODE -ne 0) { & $Python -m pip install --user flask --quiet 2>$null }
-        if ($LASTEXITCODE -eq 0) { Write-OK "flask installed" } else { $VerifyFailed = $true }
-    }
-
-    $corsCheck = & $Python -c "import flask_cors; print('ok')" 2>&1
-    if ($LASTEXITCODE -eq 0) {
-        Write-OK "flask-cors"
-    } else {
-        & $Python -m pip install flask-cors --quiet 2>$null
-        if ($LASTEXITCODE -eq 0) { Write-OK "flask-cors installed" } else { $VerifyFailed = $true }
-    }
-
-    # Final smoke test
-    $smoke = & $Python -c "from flask import Flask; from flask_cors import CORS; print('OK')" 2>&1
+    $flaskCheck = & $Python -c "from flask import Flask; from flask_cors import CORS; print('OK')" 2>&1
     if ($LASTEXITCODE -eq 0) {
         Write-OK "Core dependencies ready"
     } else {
-        Write-Warn "Flask import still fails - you may need to run: $Python -m pip install flask flask-cors"
+        Write-Warn "Flask import fails - installing in venv..."
+        & $Python -m pip install flask flask-cors --quiet 2>$null
     }
 
     # Verify audio analysis dependencies
@@ -318,7 +314,7 @@ try {
         Write-OK "Audio analysis: fully enabled (stem separation + lyrics transcription)"
     } else {
         Write-Warn "Audio analysis: partially available. For full features, run:"
-        Write-Host "  $Python -m pip install torch torchaudio demucs openai-whisper" -ForegroundColor Cyan
+        Write-Host "  $VenvDir\Scripts\pip.exe install torch torchaudio demucs openai-whisper" -ForegroundColor Cyan
     }
 } finally {
     Pop-Location
@@ -391,6 +387,7 @@ Write-Host ""
 Write-Host "  Local:    $IDE_LOCAL" -ForegroundColor Cyan
 Write-Host "  Network:  $IDE_URL" -ForegroundColor Cyan
 Write-Host "  Dir:      $InstallDir" -ForegroundColor Cyan
+Write-Host "  Venv:     $VenvDir" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "  Press Ctrl+C to stop the server" -ForegroundColor Yellow
 Write-Host ""
