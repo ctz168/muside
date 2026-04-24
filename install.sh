@@ -213,6 +213,73 @@ else
     warn "pip install may have failed — will verify in Step 4"
 fi
 
+# ── Install audio analysis dependencies (torch, demucs, whisper) ──
+# These are needed for smart stem separation + lyrics transcription
+info "Installing audio analysis dependencies (may take a few minutes)..."
+
+AUDIO_OK=true
+AUDIO_PKGS="torch torchaudio demucs openai-whisper"
+
+# Install torch first (CPU-only to save disk space and download time)
+info "Installing PyTorch (CPU version)..."
+if [ "$PLATFORM" = "debian" ] || [ "$PLATFORM" = "proot" ] || [ "$PLATFORM" = "alpine" ]; then
+    $PYTHON -m pip install --break-system-packages torch torchaudio --index-url https://download.pytorch.org/whl/cpu 2>&1 || \
+    $PYTHON -m pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu 2>&1 || \
+    $PYTHON -m pip install --user torch torchaudio --index-url https://download.pytorch.org/whl/cpu 2>&1 || {
+        warn "CPU-only torch install failed, trying standard package..."
+        $PYTHON -m pip install --break-system-packages torch torchaudio 2>&1 || \
+        $PYTHON -m pip install torch torchaudio 2>&1 || \
+        $PYTHON -m pip install --user torch torchaudio 2>&1 || AUDIO_OK=false
+    }
+else
+    $PYTHON -m pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu 2>&1 || \
+    $PYTHON -m pip install torch torchaudio 2>&1 || \
+    $PYTHON -m pip install --user torch torchaudio 2>&1 || AUDIO_OK=false
+fi
+
+if $AUDIO_OK && $PYTHON -c "import torch" 2>/dev/null; then
+    ok "torch + torchaudio"
+else
+    warn "torch/torchaudio install failed — audio analysis will be limited"
+    AUDIO_OK=false
+fi
+
+# Install demucs for stem separation
+if $AUDIO_OK; then
+    info "Installing Demucs (stem separation)..."
+    if [ "$PLATFORM" = "debian" ] || [ "$PLATFORM" = "proot" ] || [ "$PLATFORM" = "alpine" ]; then
+        $PYTHON -m pip install --break-system-packages demucs 2>&1 || \
+        $PYTHON -m pip install demucs 2>&1 || \
+        $PYTHON -m pip install --user demucs 2>&1 || true
+    else
+        $PYTHON -m pip install demucs 2>&1 || \
+        $PYTHON -m pip install --user demucs 2>&1 || true
+    fi
+    if $PYTHON -c "from demucs.pretrained import get_model" 2>/dev/null; then
+        ok "demucs (stem separation)"
+    else
+        warn "demucs install failed — stem separation unavailable"
+    fi
+fi
+
+# Install openai-whisper for lyrics transcription
+if $AUDIO_OK; then
+    info "Installing Whisper (lyrics transcription)..."
+    if [ "$PLATFORM" = "debian" ] || [ "$PLATFORM" = "proot" ] || [ "$PLATFORM" = "alpine" ]; then
+        $PYTHON -m pip install --break-system-packages openai-whisper 2>&1 || \
+        $PYTHON -m pip install openai-whisper 2>&1 || \
+        $PYTHON -m pip install --user openai-whisper 2>&1 || true
+    else
+        $PYTHON -m pip install openai-whisper 2>&1 || \
+        $PYTHON -m pip install --user openai-whisper 2>&1 || true
+    fi
+    if $PYTHON -c "import whisper" 2>/dev/null; then
+        ok "openai-whisper (lyrics transcription)"
+    else
+        warn "whisper install failed — lyrics transcription unavailable"
+    fi
+fi
+
 # ── Git clone with retry + mirror fallback ───────────
 CLONE_URLS=(
     "https://github.com/ctz168/muside.git"
@@ -350,12 +417,42 @@ fi
 # Final smoke test
 SMOKE_OK=false
 if python3 -c "from flask import Flask; from flask_cors import CORS; print('OK')" 2>/dev/null; then
-    ok "All dependencies ready"
+    ok "Core dependencies ready"
     SMOKE_OK=true
 else
     warn "Flask import still fails — you may need to run:"
     echo -e "  ${CYAN}pip3 install flask flask-cors${NC}"
     echo ""
+fi
+
+# Verify audio analysis dependencies
+AUDIO_CHECK_OK=true
+if python3 -c "import torch" 2>/dev/null; then
+    ok "torch: $(python3 -c 'import torch; print(torch.__version__)' 2>/dev/null)"
+else
+    warn "torch not installed — audio analysis will be limited"
+    AUDIO_CHECK_OK=false
+fi
+
+if python3 -c "from demucs.pretrained import get_model" 2>/dev/null; then
+    ok "demucs: stem separation ready"
+else
+    warn "demucs not installed — stem separation unavailable"
+    AUDIO_CHECK_OK=false
+fi
+
+if python3 -c "import whisper" 2>/dev/null; then
+    ok "whisper: lyrics transcription ready"
+else
+    warn "whisper not installed — lyrics transcription unavailable"
+    AUDIO_CHECK_OK=false
+fi
+
+if $AUDIO_CHECK_OK; then
+    ok "Audio analysis: fully enabled (stem separation + lyrics transcription)"
+else
+    warn "Audio analysis: partially available. For full features, run:"
+    echo -e "  ${CYAN}pip3 install torch torchaudio demucs openai-whisper${NC}"
 fi
 
 # Create workspace & config dirs

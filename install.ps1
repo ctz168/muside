@@ -135,6 +135,44 @@ if ($LASTEXITCODE -eq 0) {
     Write-Warn "pip install failed - try: $Python -m pip install flask flask-cors"
 }
 
+# ── Install audio analysis dependencies ──
+# These are needed for smart stem separation + lyrics transcription
+Write-Info "Installing audio analysis dependencies (may take a few minutes)..."
+
+# Install PyTorch (CPU version to save disk space)
+Write-Info "Installing PyTorch (CPU version)..."
+& $Python -m pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu --quiet 2>$null
+if ($LASTEXITCODE -ne 0) {
+    Write-Info "CPU-only install failed, trying standard package..."
+    & $Python -m pip install torch torchaudio --quiet 2>$null
+}
+$torchCheck = & $Python -c "import torch; print(torch.__version__)" 2>&1
+if ($LASTEXITCODE -eq 0) {
+    Write-OK "torch $torchCheck + torchaudio"
+} else {
+    Write-Warn "torch/torchaudio install failed - audio analysis will be limited"
+}
+
+# Install demucs for stem separation
+Write-Info "Installing Demucs (stem separation)..."
+& $Python -m pip install demucs --quiet 2>$null
+$demucsCheck = & $Python -c "from demucs.pretrained import get_model; print('ok')" 2>&1
+if ($LASTEXITCODE -eq 0) {
+    Write-OK "demucs (stem separation)"
+} else {
+    Write-Warn "demucs install failed - stem separation unavailable"
+}
+
+# Install openai-whisper for lyrics transcription
+Write-Info "Installing Whisper (lyrics transcription)..."
+& $Python -m pip install openai-whisper --quiet 2>$null
+$whisperCheck = & $Python -c "import whisper; print('ok')" 2>&1
+if ($LASTEXITCODE -eq 0) {
+    Write-OK "openai-whisper (lyrics transcription)"
+} else {
+    Write-Warn "whisper install failed - lyrics transcription unavailable"
+}
+
 # ── Step 3: Clone & setup ──────────────────────────────
 Write-Host ""
 Write-Host "[3/5] Setting up MusIDE IDE..." -ForegroundColor Blue
@@ -245,9 +283,42 @@ try {
     # Final smoke test
     $smoke = & $Python -c "from flask import Flask; from flask_cors import CORS; print('OK')" 2>&1
     if ($LASTEXITCODE -eq 0) {
-        Write-OK "All dependencies ready"
+        Write-OK "Core dependencies ready"
     } else {
         Write-Warn "Flask import still fails - you may need to run: $Python -m pip install flask flask-cors"
+    }
+
+    # Verify audio analysis dependencies
+    $audioOk = $true
+    $torchVer = & $Python -c "import torch; print(torch.__version__)" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        Write-OK "torch $torchVer"
+    } else {
+        Write-Warn "torch not installed - audio analysis will be limited"
+        $audioOk = $false
+    }
+
+    $demucsVer = & $Python -c "from demucs.pretrained import get_model; print('ok')" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        Write-OK "demucs (stem separation)"
+    } else {
+        Write-Warn "demucs not installed - stem separation unavailable"
+        $audioOk = $false
+    }
+
+    $whisperVer = & $Python -c "import whisper; print('ok')" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        Write-OK "whisper (lyrics transcription)"
+    } else {
+        Write-Warn "whisper not installed - lyrics transcription unavailable"
+        $audioOk = $false
+    }
+
+    if ($audioOk) {
+        Write-OK "Audio analysis: fully enabled (stem separation + lyrics transcription)"
+    } else {
+        Write-Warn "Audio analysis: partially available. For full features, run:"
+        Write-Host "  $Python -m pip install torch torchaudio demucs openai-whisper" -ForegroundColor Cyan
     }
 } finally {
     Pop-Location
