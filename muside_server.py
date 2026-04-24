@@ -51,6 +51,7 @@ except Exception as e:
 from routes.server_mgmt import bp as server_mgmt_bp
 from routes.browser import bp as browser_bp
 from routes.debug import bp as debug_bp
+from routes.audio import bp as audio_bp
 
 app.register_blueprint(files_bp)
 app.register_blueprint(run_bp)
@@ -62,6 +63,7 @@ if update_bp:
 app.register_blueprint(server_mgmt_bp)
 app.register_blueprint(browser_bp)
 app.register_blueprint(debug_bp)
+app.register_blueprint(audio_bp)
 
 # ==================== Frontend Serving ====================
 # static_url_path=None: disable Flask's built-in static route to avoid

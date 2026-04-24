@@ -296,6 +296,17 @@ window.TrackEditor = (function () {
                     });
 
                     track.audioBuffers[clip.id] = buffer;
+
+                    // 上传文件到服务器持久化保存
+                    _uploadAudioToServer(file).then(function(serverPath) {
+                        if (serverPath) {
+                            clip.serverAudioPath = serverPath;
+                        }
+                        autoSaveProject();
+                    }).catch(function(err) {
+                        console.warn('Audio upload to server failed:', err);
+                    });
+
                     renderAll();
                     resolve(clip);
                 }, function (err) {
@@ -305,6 +316,248 @@ window.TrackEditor = (function () {
             reader.onerror = function () { reject(new Error('文件读取失败')); };
             reader.readAsArrayBuffer(file);
         });
+    }
+
+    // ───────────────────── 服务器音频上传 ─────────────────────
+    function _uploadAudioToServer(file) {
+        return new Promise(function(resolve, reject) {
+            var formData = new FormData();
+            formData.append('file', file);
+            fetch('/api/audio/upload', {
+                method: 'POST',
+                body: formData,
+            }).then(function(resp) {
+                return resp.json();
+            }).then(function(data) {
+                if (data.ok && data.path) {
+                    resolve(data.path);
+                } else {
+                    reject(new Error(data.error || 'Upload failed'));
+                }
+            }).catch(function(err) {
+                reject(err);
+            });
+        });
+    }
+
+    // ───────────────────── 项目持久化 ─────────────────────
+    let _autoSaveTimer = null;
+    let _projectLoaded = false;
+
+    function _serializeProject() {
+        return {
+            bpm: _bpm,
+            timeSigNum: _timeSigNum,
+            timeSigDen: _timeSigDen,
+            swing: _swing,
+            humanize: _humanize,
+            quantizeValue: _quantizeValue,
+            isLooping: _isLooping,
+            loopStart: _loopStart,
+            loopEnd: _loopEnd,
+            trackIdCounter: _trackIdCounter,
+            tracks: _tracks.map(function(t) {
+                return {
+                    id: t.id,
+                    name: t.name,
+                    color: t.color,
+                    volume: t.volume,
+                    pan: t.pan,
+                    mute: t.mute,
+                    solo: t.solo,
+                    armed: t.armed,
+                    timbre: Object.assign({}, t.timbre),
+                    clips: t.clips.map(function(c) {
+                        return {
+                            id: c.id,
+                            startTime: c.startTime,
+                            duration: c.duration,
+                            offset: c.offset,
+                            filePath: c.filePath,
+                            name: c.name,
+                            serverAudioPath: c.serverAudioPath || null,
+                        };
+                    }),
+                };
+            }),
+            lyrics: Object.keys(_lyrics).map(function(trackId) {
+                return { trackId: trackId, lines: _lyrics[trackId] || [] };
+            }),
+            pianoRollNotes: Object.keys(_pianoRollNotes).map(function(trackId) {
+                return { trackId: trackId, notes: _pianoRollNotes[trackId] || [] };
+            }),
+        };
+    }
+
+    function saveProject() {
+        var data = _serializeProject();
+        return fetch('/api/project/save', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data),
+        }).then(function(resp) { return resp.json(); })
+          .then(function(data) {
+              if (data.ok) {
+                  console.log('[MusIDE] Project saved at', data.saved_at);
+              }
+              return data;
+          });
+    }
+
+    function autoSaveProject() {
+        // Debounce: save at most once every 3 seconds
+        if (_autoSaveTimer) clearTimeout(_autoSaveTimer);
+        _autoSaveTimer = setTimeout(function() {
+            saveProject().catch(function(err) {
+                console.warn('[MusIDE] Auto-save failed:', err);
+            });
+        }, 3000);
+    }
+
+    function loadProject() {
+        return fetch('/api/project/load')
+            .then(function(resp) { return resp.json(); })
+            .then(function(data) {
+                if (!data.ok || !data.project) return null;
+                var p = data.project;
+                console.log('[MusIDE] Loading project saved at', p.saved_at);
+
+                // Restore project settings
+                _bpm = p.bpm || DEFAULT_BPM;
+                _timeSigNum = p.timeSigNum || DEFAULT_TIME_SIG_NUM;
+                _timeSigDen = p.timeSigDen || DEFAULT_TIME_SIG_DEN;
+                _swing = p.swing || 0;
+                _humanize = p.humanize || 0;
+                _quantizeValue = p.quantizeValue || 0;
+                _isLooping = p.isLooping || false;
+                _loopStart = p.loopStart || 0;
+                _loopEnd = p.loopEnd || 0;
+                _trackIdCounter = p.trackIdCounter || 0;
+
+                // Clear existing tracks
+                _tracks.forEach(function(track) {
+                    try { track.gainNode.disconnect(); } catch(e) {}
+                    try { track.panNode.disconnect(); } catch(e) {}
+                    try { track.analyser.disconnect(); } catch(e) {}
+                });
+                _tracks = [];
+                _vuMeters = {};
+
+                // Restore tracks
+                if (p.tracks && p.tracks.length > 0) {
+                    var ctx = getAudioContext();
+                    var master = ensureMasterGain();
+
+                    p.tracks.forEach(function(tData) {
+                        // Create Web Audio nodes for this track
+                        var gainNode = ctx.createGain();
+                        gainNode.gain.value = tData.volume || 0.8;
+                        var panNode = ctx.createStereoPanner();
+                        panNode.pan.value = tData.pan || 0;
+                        var analyser = ctx.createAnalyser();
+                        analyser.fftSize = 256;
+                        analyser.smoothingTimeConstant = 0.8;
+
+                        gainNode.connect(panNode);
+                        panNode.connect(analyser);
+                        analyser.connect(master);
+
+                        var track = {
+                            id: tData.id,
+                            name: tData.name,
+                            color: tData.color,
+                            volume: tData.volume,
+                            pan: tData.pan,
+                            mute: tData.mute,
+                            solo: tData.solo,
+                            armed: tData.armed,
+                            gainNode: gainNode,
+                            panNode: panNode,
+                            analyser: analyser,
+                            clips: [],
+                            audioBuffers: {},
+                            timbre: tData.timbre || Object.assign({}, _defaultTimbre),
+                        };
+
+                        // Restore clips
+                        if (tData.clips) {
+                            tData.clips.forEach(function(cData) {
+                                var clip = {
+                                    id: cData.id,
+                                    startTime: cData.startTime || 0,
+                                    duration: cData.duration || 0,
+                                    offset: cData.offset || 0,
+                                    filePath: cData.filePath || '',
+                                    name: cData.name || '音频剪辑',
+                                    waveformPeaks: null, // Will be regenerated after audio loads
+                                    serverAudioPath: cData.serverAudioPath || null,
+                                };
+                                track.clips.push(clip);
+
+                                // Load audio buffer from server
+                                if (cData.serverAudioPath) {
+                                    _loadAudioBufferFromServer(track, clip, cData.serverAudioPath);
+                                }
+                            });
+                        }
+
+                        _tracks.push(track);
+                        _vuMeters[track.id] = { analyser: analyser, peak: 0, rms: 0 };
+                    });
+
+                    updateTrackAudioRouting();
+                }
+
+                // Restore lyrics
+                if (p.lyrics) {
+                    _lyrics = {};
+                    p.lyrics.forEach(function(entry) {
+                        _lyrics[entry.trackId] = entry.lines || [];
+                    });
+                }
+
+                // Restore piano roll notes
+                if (p.pianoRollNotes) {
+                    _pianoRollNotes = {};
+                    p.pianoRollNotes.forEach(function(entry) {
+                        _pianoRollNotes[entry.trackId] = entry.notes || [];
+                    });
+                }
+
+                _projectLoaded = true;
+                renderAll();
+                return p;
+            });
+    }
+
+    // Download audio from server and decode into AudioBuffer
+    function _loadAudioBufferFromServer(track, clip, serverPath) {
+        var ctx = getAudioContext();
+        fetch(serverPath)
+            .then(function(resp) {
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                return resp.arrayBuffer();
+            })
+            .then(function(arrayBuffer) {
+                return ctx.decodeAudioData(arrayBuffer);
+            })
+            .then(function(buffer) {
+                track.audioBuffers[clip.id] = buffer;
+
+                // Regenerate waveform peaks
+                var pixPerBeat = PIXELS_PER_BEAT_BASE * _zoom;
+                var secPerPix = (60 / _bpm) / pixPerBeat;
+                var samplesPerPix = Math.max(1, Math.round(secPerPix * buffer.sampleRate));
+                clip.waveformPeaks = extractPeaks(buffer, samplesPerPix);
+
+                // Update duration from actual audio
+                clip.duration = buffer.duration;
+
+                renderAll();
+            })
+            .catch(function(err) {
+                console.warn('[MusIDE] Failed to load audio for clip', clip.name, ':', err);
+            });
     }
 
     // ───────────────────── 回放引擎 ─────────────────────
@@ -2428,15 +2681,27 @@ window.TrackEditor = (function () {
         ensureMasterGain();
         buildUI();
 
-        // 创建默认轨道
-        if (_tracks.length === 0) {
+        // 尝试从服务器加载保存的项目
+        loadProject().then(function(project) {
+            if (!project || !project.tracks || project.tracks.length === 0) {
+                // 没有保存的项目，创建默认轨道
+                createTrack('主旋律');
+                createTrack('伴奏');
+                createTrack('鼓组');
+                createTrack('贝斯');
+                renderAll();
+            }
+            // 如果有保存的项目，loadProject 已经恢复并 renderAll 了
+        }).catch(function(err) {
+            console.warn('[MusIDE] Failed to load project:', err);
+            // 加载失败，创建默认轨道
             createTrack('主旋律');
             createTrack('伴奏');
             createTrack('鼓组');
             createTrack('贝斯');
-        }
+            renderAll();
+        });
 
-        renderAll();
         _initialized = true;
 
         // 移动端: 确保AudioContext在首次触摸时恢复
@@ -2446,18 +2711,36 @@ window.TrackEditor = (function () {
             }
             document.removeEventListener('touchstart', resumeAudio);
         }, { once: true });
+
+        // 页面关闭前自动保存
+        window.addEventListener('beforeunload', function() {
+            if (_tracks.length > 0) {
+                // 使用同步 XMLHttpRequest 确保在页面关闭前完成保存
+                try {
+                    var data = _serializeProject();
+                    var xhr = new XMLHttpRequest();
+                    xhr.open('POST', '/api/project/save', false); // false = synchronous
+                    xhr.setRequestHeader('Content-Type', 'application/json');
+                    xhr.send(JSON.stringify(data));
+                } catch(e) {}
+            }
+        });
     }
 
     function addTrack(name) {
         if (_tracks.length >= MAX_TRACKS) return null;
         const track = createTrack(name);
-        if (track) renderAll();
+        if (track) {
+            renderAll();
+            autoSaveProject();
+        }
         return track ? track.id : null;
     }
 
     function removeTrack(id) {
         removeTrackById(id);
         renderAll();
+        autoSaveProject();
     }
 
     function getTracks() {
@@ -2696,6 +2979,8 @@ window.TrackEditor = (function () {
         setBPM: setBPM,
         setTimeSignature: setTimeSignature,
         loadAudioFile: loadAudioFile,
+        saveProject: saveProject,
+        loadProject: loadProject,
         seek: seek,
         getCurrentTime: getCurrentTime,
         getDuration: getDuration,
