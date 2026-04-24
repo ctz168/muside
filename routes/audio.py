@@ -1,8 +1,8 @@
 """
 MusIDE - Audio library, stem separation, lyrics transcription, and project persistence API.
 
-Audio files are saved to ~/.muside/audio_library/
-Separated stems are saved to ~/.muside/audio_library/stems/
+Audio files are saved to <workspace>/audio/ (visible in file browser)
+Separated stems are saved to <workspace>/audio/stems/
 Lyrics transcription results are saved alongside audio files as .lyrics.json
 Project state (tracks, clips, BPM, settings) is saved to ~/.muside/project.json
 Analysis jobs are tracked in memory with progress updates.
@@ -16,7 +16,7 @@ import threading
 import traceback
 from datetime import datetime
 from flask import Blueprint, jsonify, request, send_from_directory
-from utils import handle_error, CONFIG_DIR
+from utils import handle_error, CONFIG_DIR, WORKSPACE
 
 bp = Blueprint('audio', __name__)
 
@@ -80,11 +80,37 @@ def get_capabilities():
     })
 
 
-# ── Audio Library ──
-AUDIO_LIBRARY_DIR = os.path.join(CONFIG_DIR, 'audio_library')
+# ── Audio Library (saved in workspace so files are visible in file browser) ──
+AUDIO_LIBRARY_DIR = os.path.join(WORKSPACE, 'audio')
 STEMS_DIR = os.path.join(AUDIO_LIBRARY_DIR, 'stems')
 os.makedirs(AUDIO_LIBRARY_DIR, exist_ok=True)
 os.makedirs(STEMS_DIR, exist_ok=True)
+
+# ── Migrate audio files from old location (~/.muside/audio_library/) ──
+_OLD_AUDIO_DIR = os.path.join(CONFIG_DIR, 'audio_library')
+if os.path.isdir(_OLD_AUDIO_DIR) and os.listdir(_OLD_AUDIO_DIR):
+    try:
+        import shutil
+        migrated = 0
+        for item in os.listdir(_OLD_AUDIO_DIR):
+            src = os.path.join(_OLD_AUDIO_DIR, item)
+            dst = os.path.join(AUDIO_LIBRARY_DIR, item)
+            if not os.path.exists(dst):
+                shutil.move(src, dst)
+                migrated += 1
+        # Also migrate stems directory if exists
+        old_stems = os.path.join(_OLD_AUDIO_DIR, 'stems')
+        if os.path.isdir(old_stems):
+            for item in os.listdir(old_stems):
+                src = os.path.join(old_stems, item)
+                dst = os.path.join(STEMS_DIR, item)
+                if not os.path.exists(dst):
+                    shutil.move(src, dst)
+                    migrated += 1
+        if migrated > 0:
+            log_write(f'[MusIDE] Migrated {migrated} audio files from old location to workspace/audio/')
+    except Exception as e:
+        log_write(f'[MusIDE] Audio migration warning: {e}')
 
 # ── Project State ──
 PROJECT_FILE = os.path.join(CONFIG_DIR, 'project.json')

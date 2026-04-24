@@ -103,11 +103,88 @@ if (-not $Python) {
 $pyVer = & $Python --version 2>&1
 Write-OK $pyVer
 
-# ── Step 2: Create venv + install ALL dependencies ──────
+# ── Step 2: Clone repo first ──────────────────────────────
 Write-Host ""
-Write-Host "[2/5] Setting up Python environment & installing dependencies..." -ForegroundColor Blue
+Write-Host "[2/5] Downloading MusIDE IDE..." -ForegroundColor Blue
 
-# Create venv in install dir
+if (Test-Path "$InstallDir\.git") {
+    Write-Info "Updating existing installation..."
+    Push-Location $InstallDir
+    git pull --ff-only 2>$null
+    if ($LASTEXITCODE -ne 0) { Write-Warn "git pull failed - using existing files" }
+    Pop-Location
+} else {
+    Write-Info "Cloning ctz168/muside..."
+
+    $git = Get-Command git -ErrorAction SilentlyContinue
+    if (-not $git) {
+        Write-Info "Installing git via winget..."
+        winget install Git.Git --accept-package-agreements --accept-source-agreements 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+        }
+    }
+
+    $git = Get-Command git -ErrorAction SilentlyContinue
+    if (-not $git) {
+        Write-Fail "git not found - please install Git: https://git-scm.com/download/win"
+        exit 1
+    }
+
+    # Clone to temp dir first, then copy (preserves any existing .venv)
+    $CloneTmp = Join-Path $env:TEMP "muside-clone-$(Get-Random)"
+    $CloneUrls = @(
+        "https://github.com/ctz168/muside.git",
+        "https://ghfast.top/https://github.com/ctz168/muside.git",
+        "https://gh-proxy.com/https://github.com/ctz168/muside.git",
+        "https://mirror.ghproxy.com/https://github.com/ctz168/muside.git"
+    )
+
+    $CloneOK = $false
+    $UsedUrl = $null
+    foreach ($url in $CloneUrls) {
+        for ($attempt = 1; $attempt -le 3; $attempt++) {
+            Write-Info "Cloning (attempt $attempt/3)..."
+            git clone --depth 1 $url $CloneTmp 2>$null
+            if ($LASTEXITCODE -eq 0) {
+                $CloneOK = $true
+                $UsedUrl = $url
+                break
+            }
+            if ($attempt -lt 3) { Start-Sleep -Seconds 2 }
+        }
+        if ($CloneOK) { break }
+        Remove-Item -Recurse -Force $CloneTmp -ErrorAction SilentlyContinue
+    }
+
+    if (-not $CloneOK) {
+        Write-Fail "All clone attempts failed - check your network"
+        Write-Host ""
+        Write-Host "Try manually:" -ForegroundColor Yellow
+        Write-Host "  git clone https://github.com/ctz168/muside.git $InstallDir" -ForegroundColor Cyan
+        exit 1
+    }
+
+    # Copy cloned files to INSTALL_DIR (preserving any existing .venv)
+    New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+    # Robocopy: /E = recursive, /XD = exclude dirs, /NFL/NDL/NJ/NJS/NP = quiet
+    robocopy $CloneTmp $InstallDir /E /XD .venv /NFL /NDL /NJ /NJS /NP 2>$null
+    Remove-Item -Recurse -Force $CloneTmp -ErrorAction SilentlyContinue
+
+    # Normalize remote to official GitHub
+    if ($UsedUrl -ne "https://github.com/ctz168/muside.git") {
+        Push-Location $InstallDir
+        git remote set-url origin https://github.com/ctz168/muside.git 2>$null
+        Pop-Location
+        Write-Info "Remote set to official GitHub URL"
+    }
+}
+
+# ── Step 3: Create venv + install ALL dependencies (at final location) ──
+Write-Host ""
+Write-Host "[3/5] Setting up Python environment & installing dependencies..." -ForegroundColor Blue
+
+# Create venv directly at final location (no move needed)
 $VenvDir = "$InstallDir\.venv"
 
 if (-not (Test-Path "$VenvDir\Scripts\python.exe")) {
@@ -124,7 +201,7 @@ $VenvPython = "$VenvDir\Scripts\python.exe"
 $VenvPip = "$VenvDir\Scripts\pip.exe"
 
 if (Test-Path $VenvPython) {
-    Write-OK "Virtual environment created at $VenvDir"
+    Write-OK "Virtual environment at $VenvDir"
     $Python = $VenvPython
 } else {
     Write-Warn "venv creation failed, using system Python"
@@ -178,90 +255,6 @@ if ($LASTEXITCODE -eq 0) {
     Write-OK "openai-whisper (lyrics transcription)"
 } else {
     Write-Warn "whisper install failed - lyrics transcription unavailable"
-}
-
-# ── Step 3: Clone & setup ──────────────────────────────
-Write-Host ""
-Write-Host "[3/5] Setting up MusIDE IDE..." -ForegroundColor Blue
-
-if (Test-Path "$InstallDir\.git") {
-    Write-Info "Updating existing installation..."
-    Push-Location $InstallDir
-    git pull --ff-only 2>$null
-    if ($LASTEXITCODE -ne 0) { Write-Warn "git pull failed - using existing files" }
-    Pop-Location
-} else {
-    if (Test-Path $InstallDir) {
-        Write-Warn "Directory $InstallDir exists but is not a git repo"
-        $InstallDir = "$InstallDir-$(Get-Date -Format 'yyyyMMddHHmmss')"
-        Write-Warn "Using $InstallDir instead"
-    }
-
-    Write-Info "Cloning ctz168/muside..."
-
-    $git = Get-Command git -ErrorAction SilentlyContinue
-    if (-not $git) {
-        Write-Info "Installing git via winget..."
-        winget install Git.Git --accept-package-agreements --accept-source-agreements 2>$null
-        if ($LASTEXITCODE -eq 0) {
-            $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
-        }
-    }
-
-    $git = Get-Command git -ErrorAction SilentlyContinue
-    if (-not $git) {
-        Write-Fail "git not found - please install Git: https://git-scm.com/download/win"
-        exit 1
-    }
-
-    # Clone with mirror fallback
-    $CloneUrls = @(
-        "https://github.com/ctz168/muside.git",
-        "https://ghfast.top/https://github.com/ctz168/muside.git",
-        "https://gh-proxy.com/https://github.com/ctz168/muside.git",
-        "https://mirror.ghproxy.com/https://github.com/ctz168/muside.git"
-    )
-
-    $CloneOK = $false
-    foreach ($url in $CloneUrls) {
-        for ($attempt = 1; $attempt -le 3; $attempt++) {
-            Write-Info "Cloning (attempt $attempt/3)..."
-            git clone --depth 1 $url $InstallDir 2>$null
-            if ($LASTEXITCODE -eq 0) {
-                $CloneOK = $true
-                break
-            }
-            if ($attempt -lt 3) { Start-Sleep -Seconds 2 }
-        }
-        if ($CloneOK) { break }
-        # Clean up failed partial clone
-        Remove-Item -Recurse -Force $InstallDir -ErrorAction SilentlyContinue
-    }
-
-    if (-not $CloneOK) {
-        Write-Fail "All clone attempts failed - check your network"
-        Write-Host ""
-        Write-Host "Try manually:" -ForegroundColor Yellow
-        Write-Host "  git clone https://github.com/ctz168/muside.git $InstallDir" -ForegroundColor Cyan
-        exit 1
-    }
-
-    # Normalize remote to official GitHub (in case we cloned via mirror)
-    if ($url -ne "https://github.com/ctz168/muside.git") {
-        Push-Location $InstallDir
-        git remote set-url origin https://github.com/ctz168/muside.git 2>$null
-        Pop-Location
-        Write-Info "Remote set to official GitHub URL"
-    }
-}
-
-# Move venv if it was created before clone
-$TmpVenv = "$env:USERPROFILE\.muside-venv"
-if ((Test-Path $TmpVenv) -and -not (Test-Path "$InstallDir\.venv")) {
-    Move-Item $TmpVenv "$InstallDir\.venv" -Force
-    $VenvDir = "$InstallDir\.venv"
-    $VenvPython = "$VenvDir\Scripts\python.exe"
-    if (Test-Path $VenvPython) { $Python = $VenvPython }
 }
 
 # Create dirs

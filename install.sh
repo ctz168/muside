@@ -159,10 +159,6 @@ else
     fi
 fi
 
-# ── Step 2/5: Create venv + install ALL dependencies ─────
-echo ""
-echo -e "${BLUE}[2/5]${NC} Setting up Python environment & installing dependencies..."
-
 # Ensure python3-venv is available (Debian/Ubuntu need it explicitly)
 if ! $PYTHON -c "import venv" 2>/dev/null; then
     info "python3-venv not found, installing..."
@@ -177,26 +173,122 @@ if ! $PYTHON -c "import venv" 2>/dev/null; then
     esac
 fi
 
-# ── Create virtual environment ──
+# ── Git clone with retry + mirror fallback ───────────
+CLONE_URLS=(
+    "https://github.com/ctz168/muside.git"
+    "https://ghfast.top/https://github.com/ctz168/muside.git"
+    "https://gh-proxy.com/https://github.com/ctz168/muside.git"
+    "https://mirror.ghproxy.com/https://github.com/ctz168/muside.git"
+)
+
+# ── Step 2/5: Clone repo ────────────────────────────
+echo ""
+echo -e "${BLUE}[2/5]${NC} Downloading MusIDE IDE..."
+
+# Ensure git is available
+if ! command -v git &>/dev/null; then
+    info "git not found, installing..."
+    case "$PLATFORM" in
+        termux)  install_packages termux git ;;
+        proot)   apt-get update -qq; apt-get install -y git ;;
+        debian)  install_packages debian git ;;
+        fedora)  install_packages fedora git ;;
+        centos)  install_packages centos git ;;
+        alpine)  install_packages alpine git ;;
+        arch)    install_packages arch git ;;
+        opensuse) install_packages opensuse git ;;
+        macos)   brew install git ;;
+    esac
+fi
+
+# Clone or update
+if [ -d "$INSTALL_DIR/.git" ]; then
+    info "Updating existing installation..."
+    cd "$INSTALL_DIR"
+    git pull --ff-only 2>&1 || warn "git pull failed — using existing files"
+else
+    # Clone to a temp dir first, then move files
+    # This avoids issues with existing INSTALL_DIR (e.g. leftover .venv from previous install)
+    CLONE_TMP=$(mktemp -d)
+    CLONE_OK=false
+    for url in "${CLONE_URLS[@]}"; do
+        for attempt in 1 2 3; do
+            info "Cloning from ${url%%//*/}//... (attempt $attempt/3)..."
+            CLONE_ERR=$(git clone --depth 1 "$url" "$CLONE_TMP/muside" 2>&1) && {
+                CLONE_OK=true
+                break 2
+            }
+            # Show the actual error on last attempt for this URL
+            if [ $attempt -eq 3 ]; then
+                warn "Failed with ${url%%\/*} — $(echo "$CLONE_ERR" | tail -1)"
+            else
+                sleep 2
+            fi
+        done
+        $CLONE_OK && break
+    done
+
+    if ! $CLONE_OK; then
+        fail "All clone attempts failed."
+        fail "Last error: $(echo "$CLONE_ERR" | tail -3)"
+        rm -rf "$CLONE_TMP"
+        echo ""
+        info "Try manually:"
+        echo -e "  ${CYAN}git clone https://github.com/ctz168/muside.git ~/muside-ide${NC}"
+        echo -e "  ${CYAN}cd ~/muside-ide && python3 muside_server.py${NC}"
+        exit 1
+    fi
+
+    # Move cloned files to INSTALL_DIR (preserving any existing .venv)
+    mkdir -p "$INSTALL_DIR"
+    # Use rsync if available (faster, handles existing files better)
+    if command -v rsync &>/dev/null; then
+        rsync -a --exclude='.venv' "$CLONE_TMP/muside/" "$INSTALL_DIR/"
+    else
+        # Fallback: copy files, skip .venv
+        cd "$CLONE_TMP/muside"
+        for item in *; do
+            if [ "$item" = ".venv" ]; then continue; fi
+            cp -a "$item" "$INSTALL_DIR/" 2>/dev/null
+        done
+        # Copy hidden files too (like .gitignore, .git)
+        for item in .*; do
+            if [ "$item" = "." ] || [ "$item" = ".." ] || [ "$item" = ".venv" ]; then continue; fi
+            cp -a "$item" "$INSTALL_DIR/" 2>/dev/null
+        done
+    fi
+    rm -rf "$CLONE_TMP"
+
+    # Normalize remote to official GitHub (in case we cloned via mirror)
+    cd "$INSTALL_DIR"
+    git remote set-url origin https://github.com/ctz168/muside.git 2>/dev/null || true
+    info "Remote set to official GitHub URL"
+fi
+
+# ── Step 3/5: Create venv + install ALL dependencies ─────
+echo ""
+echo -e "${BLUE}[3/5]${NC} Setting up Python environment & installing dependencies..."
+
+cd "$INSTALL_DIR" || {
+    fail "Cannot cd to $INSTALL_DIR"
+    exit 1
+}
+
+# ── Create virtual environment at final location (no move needed) ──
 VENV_DIR="$INSTALL_DIR/.venv"
 
-# If venv already exists, just activate it
 if [ -d "$VENV_DIR" ] && [ -f "$VENV_DIR/bin/python3" ]; then
     info "Using existing virtual environment at $VENV_DIR"
 else
-    # Create venv (dir may not exist yet if we haven't cloned, use tmp location)
-    VENV_TMP="$HOME/.muside-venv"
     info "Creating virtual environment (avoids PEP 668 pip restrictions)..."
-    $PYTHON -m venv "$VENV_TMP" 2>&1 || {
+    $PYTHON -m venv "$VENV_DIR" 2>&1 || {
         # Fallback: try with --system-site-packages
-        $PYTHON -m venv --system-site-packages "$VENV_TMP" 2>&1 || {
+        $PYTHON -m venv --system-site-packages "$VENV_DIR" 2>&1 || {
             fail "Cannot create virtual environment. Please install python3-venv:"
             echo -e "  ${CYAN}apt-get install python3-venv${NC}  (Debian/Ubuntu)"
             exit 1
         }
     }
-    # Will move to INSTALL_DIR/.venv after clone
-    VENV_DIR="$VENV_TMP"
 fi
 
 # Activate venv
@@ -204,7 +296,7 @@ source "$VENV_DIR/bin/activate" || {
     fail "Cannot activate virtual environment"
     exit 1
 }
-ok "Virtual environment activated"
+ok "Virtual environment activated ($VENV_DIR)"
 
 # Upgrade pip in venv
 pip install --upgrade pip --quiet 2>/dev/null
@@ -252,111 +344,15 @@ else
     warn "whisper not installed — lyrics transcription unavailable"
 fi
 
-# ── Git clone with retry + mirror fallback ───────────
-CLONE_URLS=(
-    "https://github.com/ctz168/muside.git"
-    "https://ghfast.top/https://github.com/ctz168/muside.git"
-    "https://gh-proxy.com/https://github.com/ctz168/muside.git"
-    "https://mirror.ghproxy.com/https://github.com/ctz168/muside.git"
-)
-
-# ── Step 3/5: Clone repo ────────────────────────────
-echo ""
-echo -e "${BLUE}[3/5]${NC} Setting up MusIDE IDE..."
-
-# Ensure git is available
-if ! command -v git &>/dev/null; then
-    info "git not found, installing..."
-    case "$PLATFORM" in
-        termux)  pkg install -y git ;;
-        proot)   apt-get update -qq; apt-get install -y git ;;
-        debian)  install_packages debian git ;;
-        fedora)  install_packages fedora git ;;
-        centos)  install_packages centos git ;;
-        alpine)  install_packages alpine git ;;
-        arch)    install_packages arch git ;;
-        opensuse) install_packages opensuse git ;;
-        macos)   brew install git ;;
-    esac
-fi
-
-# Clone or update
-if [ -d "$INSTALL_DIR/.git" ]; then
-    info "Updating existing installation..."
-    cd "$INSTALL_DIR"
-    git pull --ff-only 2>&1 || warn "git pull failed — using existing files"
-else
-    if [ -d "$INSTALL_DIR" ]; then
-        warn "Directory $INSTALL_DIR exists but is not a git repo"
-        INSTALL_DIR="${INSTALL_DIR}-$(date +%s)"
-        warn "Using $INSTALL_DIR instead"
-    fi
-
-    # Try cloning with retries and mirror fallback
-    CLONE_OK=false
-    for url in "${CLONE_URLS[@]}"; do
-        for attempt in 1 2 3; do
-            info "Cloning from ${url%%//*/}//... (attempt $attempt/3)..."
-            CLONE_ERR=$(git clone --depth 1 "$url" "$INSTALL_DIR" 2>&1) && {
-                CLONE_OK=true
-                break 2
-            }
-            # Show the actual error on last attempt for this URL
-            if [ $attempt -eq 3 ]; then
-                warn "Failed with ${url%%\/*} — $(echo "$CLONE_ERR" | tail -1)"
-            else
-                sleep 2
-            fi
-        done
-        $CLONE_OK && break
-        # Clean up failed partial clone
-        rm -rf "$INSTALL_DIR"
-    done
-
-    if ! $CLONE_OK; then
-        fail "All clone attempts failed."
-        fail "Last error: $(echo "$CLONE_ERR" | tail -3)"
-        echo ""
-        info "Try manually:"
-        echo -e "  ${CYAN}git clone https://github.com/ctz168/muside.git ~/muside-ide${NC}"
-        echo -e "  ${CYAN}cd ~/muside-ide && python3 muside_server.py${NC}"
-        exit 1
-    fi
-
-    # Normalize remote to official GitHub (in case we cloned via mirror)
-    if [ "$url" != "https://github.com/ctz168/muside.git" ]; then
-        cd "$INSTALL_DIR"
-        git remote set-url origin https://github.com/ctz168/muside.git 2>/dev/null || true
-        info "Remote set to official GitHub URL"
-    fi
-fi
-
-# Move venv to INSTALL_DIR if it was created in tmp location
-VENV_TMP="$HOME/.muside-venv"
-FINAL_VENV="$INSTALL_DIR/.venv"
-if [ -d "$VENV_TMP" ] && [ ! -d "$FINAL_VENV" ]; then
-    mv "$VENV_TMP" "$FINAL_VENV"
-    VENV_DIR="$FINAL_VENV"
-    info "Moved venv to $VENV_DIR"
-    # Re-activate from new location
-    deactivate 2>/dev/null
-    source "$VENV_DIR/bin/activate"
-fi
-
 # ── Step 4/5: Final verification ──────────────────────────
 echo ""
-echo -e "${BLUE}[4/5]${NC} Verifying in target environment..."
-
-cd "$INSTALL_DIR" || {
-    fail "Cannot cd to $INSTALL_DIR"
-    exit 1
-}
+echo -e "${BLUE}[4/5]${NC} Verifying installation..."
 
 # Core dependencies
 if python3 -c "from flask import Flask; from flask_cors import CORS; print('OK')" 2>/dev/null; then
     ok "Core dependencies: flask $(python3 -c 'import flask; print(flask.__version__)' 2>/dev/null)"
 else
-    warn "Flask import fails — installing in venv..."
+    warn "Flask import fails — reinstalling..."
     pip install flask flask-cors 2>&1 || warn "Could not install flask automatically"
 fi
 

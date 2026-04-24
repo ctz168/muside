@@ -14,9 +14,12 @@ if [ ! -d "$VENV_DIR" ] || [ ! -f "$VENV_DIR/bin/python3" ]; then
     python3 -m venv "$VENV_DIR" 2>/dev/null || {
         # venv module might need python3-venv package
         echo "[INFO] venv module not found, installing python3-venv..."
-        if command -v apt-get &>/dev/null; then
+        if [ "$(id -u)" = "0" ]; then
             apt-get update -qq 2>/dev/null
             apt-get install -y python3-venv 2>/dev/null
+        else
+            sudo apt-get update -qq 2>/dev/null
+            sudo apt-get install -y python3-venv 2>/dev/null
         fi
         python3 -m venv "$VENV_DIR" || {
             echo "[ERROR] Cannot create virtual environment. Please run:"
