@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes, viewport-fit=cover">
+    <title>MusIDE</title>
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <!-- Top Toolbar -->
+    <header id="toolbar">
+        <button id="btn-menu" title="文件">☰</button>
+        <span id="file-name">未打开项目</span>
+        <div id="toolbar-actions">
+            <button id="btn-rewind" title="后退">⏪</button>
+            <button id="btn-forward" title="前进">⏩</button>
+            <button id="btn-play" title="播放" style="color:#4caf50;">▶</button>
+            <button id="btn-stop" title="停止" style="color:#f44336;">⏹</button>
+            <button id="btn-pause" title="暂停">⏸</button>
+            <button id="btn-record" title="录音" style="color:#f44336;">⏺</button>
+            <button id="btn-loop" title="循环">🔁</button>
+            <button id="btn-chat" title="🎵 音乐助手">🎵</button>
+        </div>
+    </header>
+
+    <!-- Left Sidebar -->
+    <div id="sidebar-left" class="sidebar left">
+        <div id="sidebar-left-header">
+            <h3><span id="app-title">MusIDE</span><span id="project-title" class="hidden"></span></h3>
+            <button id="close-left">✕</button>
+        </div>
+        <!-- Tabs -->
+        <div id="left-tabs">
+            <button class="tab active" data-tab="project">🎵 项目</button>
+            <button class="tab" data-tab="files">📂 音频文件</button>
+            <button class="tab tab-project-only" data-tab="git" style="display:none;">🔀 Git</button>
+            <button class="tab" data-tab="search">🔍 搜索</button>
+            <button class="tab tab-project-only" data-tab="debug" style="display:none;">🔧 环境</button>
+        </div>
+        <!-- Tab Panels -->
+        <div id="left-panels">
+            <!-- Project Panel -->
+            <div id="panel-project" class="panel active">
+                <div class="panel-toolbar">
+                    <button id="btn-set-workspace" title="选定工作目录">📁 工作目录</button>
+                    <button id="btn-new-project" title="新建项目">✨ 新建</button>
+                    <button id="btn-open-project" title="打开项目">📂 打开</button>
+                    <button id="btn-clone-project" title="克隆项目">📥 克隆</button>
+                    <button id="btn-close-project" title="关闭项目" style="display:none;">✕ 关闭</button>
+                </div>
+                <!-- Workspace info bar -->
+                <div id="workspace-info-bar" class="hidden">
+                    <div id="workspace-info-content" style="padding:6px 10px;font-size:11px;color:var(--text-secondary);background:var(--bg-tertiary);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:6px;">
+                        <span style="color:var(--text-muted);">工作目录:</span>
+                        <span id="workspace-current-path" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--font-mono);color:var(--text-primary);"></span>
+                        <button id="btn-change-workspace" title="更改工作目录" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:11px;padding:2px 4px;">✏</button>
+                    </div>
+                </div>
+                <div id="project-info">
+                    <div id="project-current" class="project-no-project">
+                        <div style="text-align:center;padding:30px 12px;">
+                            <div style="font-size:36px;margin-bottom:10px;">🎵</div>
+                            <div style="font-size:13px;color:var(--text-secondary);margin-bottom:6px;">未打开音乐项目</div>
+                            <div style="font-size:11px;color:var(--text-muted);">点击「新建」创建音乐项目，或点击「打开」选择已有项目</div>
+                        </div>
+                    </div>
+                </div>
+                <!-- Project folder picker dialog content -->
+                <div id="project-folder-picker" class="hidden">
+                    <div id="project-picker-header">
+                        <button id="project-picker-back" title="返回上级" style="display:none;">⬆</button>
+                        <span id="project-picker-path" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">/</span>
+                    </div>
+                    <div id="project-picker-list"></div>
+                </div>
+                <!-- Workspace picker (for selecting root working directory) -->
+                <div id="workspace-picker" class="hidden">
+                    <div style="padding:8px 10px;background:var(--bg-tertiary);border-bottom:1px solid var(--border);">
+                        <div style="display:flex;align-items:center;gap:6px;">
+                            <button id="ws-picker-back" title="返回上级" style="display:none;background:none;border:none;color:var(--text-primary);cursor:pointer;font-size:14px;padding:2px 6px;">⬆</button>
+                            <span id="ws-picker-path" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;font-family:var(--font-mono);color:var(--text-secondary);">/</span>
+                        </div>
+                    </div>
+                    <div id="ws-picker-list" style="max-height:300px;overflow-y:auto;"></div>
+                    <div style="padding:8px 10px;border-top:1px solid var(--border);display:flex;gap:8px;">
+                        <button id="ws-picker-cancel" style="flex:1;padding:6px;border-radius:6px;border:1px solid var(--border);background:var(--bg-secondary);color:var(--text-secondary);cursor:pointer;font-size:12px;">取消</button>
+                        <button id="ws-picker-confirm" style="flex:1;padding:6px;border-radius:6px;cursor:pointer;font-size:12px;">选定此目录</button>
+                    </div>
+                </div>
+            </div>
+            <!-- Files Panel -->
+            <div id="panel-files" class="panel">
+                <div class="panel-toolbar">
+                    <button id="btn-open-folder" title="打开文件夹">📂</button>
+                    <button id="btn-new-file" title="新建音轨">➕ 音轨</button>
+                    <button id="btn-new-folder" title="新建组">➕ 组</button>
+                    <div id="workspace-path" class="workspace-breadcrumb"></div>
+                </div>
+                <div id="file-tree"></div>
+            </div>
+            <!-- Git Panel -->
+            <div id="panel-git" class="panel">
+                <div class="panel-toolbar">
+                    <button id="git-pull" title="拉取">⬇ 拉取</button>
+                    <button id="git-push" title="推送">⬆ 推送</button>
+                    <button id="git-sync" title="同步（拉取+推送）">🔄 同步</button>
+                    <button id="git-diff-all-btn" title="查看所有差异">🔎 差异</button>
+                    <button id="git-token-btn" title="配置 Token">🔑</button>
+                    <button id="git-login-btn" title="GitHub 登录授权">🔐</button>
+                    <button id="git-refresh" title="刷新 Git 状态">🔃 刷新</button>
+                </div>
+                <div id="git-branch-info">
+                    <span id="git-current-branch">-</span>
+                    <span id="git-status-count"></span>
+                </div>
+                <div id="git-changes-list"></div>
+                <div id="git-commit-area">
+                    <textarea id="git-commit-msg" placeholder="输入提交信息后直接提交..." rows="2"></textarea>
+                    <button id="git-commit-btn">提交</button>
+                </div>
+                <div id="git-log-list"></div>
+            </div>
+            <!-- Search Panel -->
+            <div id="panel-search" class="panel">
+                <div class="search-box">
+                    <input type="text" id="search-input" placeholder="搜索...">
+                    <button id="search-btn">搜索</button>
+                </div>
+                <div class="search-options">
+                    <label><input type="checkbox" id="search-case"> 区分大小写</label>
+                    <label><input type="checkbox" id="search-regex"> 正则</label>
+                    <input type="text" id="search-file-pattern" placeholder="文件过滤 (*.wav)">
+                </div>
+                <div id="search-results"></div>
+            </div>
+            <!-- Debug Panel -->
+            <div id="panel-debug" class="panel">
+                <div class="panel-toolbar">
+                    <select id="compiler-select">
+                        <option value="python3">Python 3</option>
+                    </select>
+                    <button id="venv-btn" title="虚拟环境">🔧</button>
+                </div>
+                <div id="debug-config">
+                    <div id="venv-info">
+                        <span>虚拟环境: </span><span id="current-venv">未设置</span>
+                    </div>
+                    <button id="create-venv-btn">创建虚拟环境</button>
+                    <button id="install-pkg-btn">安装包</button>
+                    <button id="import-req-btn">📥 导入requirements</button>
+                </div>
+                <div id="debug-breakpoints"></div>
+                <div id="venv-packages" style="display:none;">
+                    <div id="venv-progress-area" style="display:none;padding:8px 12px;border-top:1px solid var(--border);">
+                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+                            <span id="venv-progress-text" style="font-size:11px;color:var(--text-secondary);">正在安装...</span>
+                            <span id="venv-progress-count" style="font-size:10px;color:var(--text-muted);">0/0</span>
+                        </div>
+                        <div style="height:4px;background:var(--bg-tertiary);border-radius:2px;overflow:hidden;">
+                            <div id="venv-progress-bar" style="height:100%;width:0%;background:var(--accent);border-radius:2px;transition:width 0.3s ease;"></div>
+                        </div>
+                        <div id="venv-current-pkg" style="font-size:10px;color:var(--green);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:var(--font-mono);"></div>
+                    </div>
+                    <div style="padding:4px 12px 8px;font-size:11px;color:var(--text-muted);border-top:1px solid var(--border);">已安装包:</div>
+                    <div id="venv-pkg-list" style="flex:1;overflow-y:auto;padding:0 4px;font-size:11px;font-family:var(--font-mono);"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Editor Tabs Bar (repurposed for audio track tabs) -->
+    <div id="editor-tabs" class="editor-tabs-bar"></div>
+
+    <!-- Main Editor Area -->
+    <main id="main-area">
+        <!-- Transport Bar (replaces editor-toolbar) -->
+        <div id="editor-toolbar">
+            <div id="transport-bar" style="display:flex;align-items:center;gap:8px;padding:4px 8px;width:100%;flex-wrap:nowrap;overflow-x:auto;">
+                <button id="transport-play" title="播放" style="padding:3px 8px;border:none;background:#4caf50;color:#fff;border-radius:4px;font-size:12px;cursor:pointer;font-weight:600;">▶</button>
+                <button id="transport-pause" title="暂停" style="padding:3px 8px;border:none;background:var(--bg-surface);color:var(--text-primary);border-radius:4px;font-size:12px;cursor:pointer;">⏸</button>
+                <button id="transport-stop" title="停止" style="padding:3px 8px;border:none;background:#f44336;color:#fff;border-radius:4px;font-size:12px;cursor:pointer;font-weight:600;">⏹</button>
+                <button id="transport-record" title="录音" style="padding:3px 8px;border:none;background:#f44336;color:#fff;border-radius:4px;font-size:12px;cursor:pointer;font-weight:600;">⏺</button>
+                <button id="transport-loop" title="循环" style="padding:3px 8px;border:none;background:var(--bg-surface);color:var(--text-primary);border-radius:4px;font-size:12px;cursor:pointer;">🔁</button>
+                <span id="transport-time-display" style="font-family:var(--font-mono);font-size:12px;color:var(--text-primary);white-space:nowrap;min-width:120px;">
+                    <span id="transport-current-time">00:00.000</span> / <span id="transport-total-time">00:00.000</span>
+                </span>
+                <div style="display:flex;align-items:center;gap:4px;">
+                    <label for="transport-bpm" style="font-size:11px;color:var(--text-muted);white-space:nowrap;">BPM:</label>
+                    <input type="number" id="transport-bpm" value="120" min="20" max="300" style="width:52px;padding:2px 4px;border:1px solid var(--border);background:var(--bg-primary);color:var(--text-primary);border-radius:3px;font-size:12px;font-family:var(--font-mono);text-align:center;">
+                </div>
+                <div style="display:flex;align-items:center;gap:4px;">
+                    <label for="transport-timesig" style="font-size:11px;color:var(--text-muted);white-space:nowrap;">拍号:</label>
+                    <select id="transport-timesig" style="padding:2px 4px;border:1px solid var(--border);background:var(--bg-primary);color:var(--text-primary);border-radius:3px;font-size:12px;">
+                        <option value="4/4" selected>4/4</option>
+                        <option value="3/4">3/4</option>
+                        <option value="6/8">6/8</option>
+                        <option value="2/4">2/4</option>
+                        <option value="5/4">5/4</option>
+                        <option value="7/8">7/8</option>
+                    </select>
+                </div>
+                <div style="display:flex;align-items:center;gap:4px;flex:1;min-width:80px;max-width:160px;">
+                    <label for="transport-zoom" style="font-size:11px;color:var(--text-muted);white-space:nowrap;">缩放:</label>
+                    <input type="range" id="transport-zoom" min="1" max="20" value="5" style="flex:1;cursor:pointer;">
+                </div>
+                <div style="display:flex;align-items:center;gap:4px;flex:1;min-width:80px;max-width:160px;">
+                    <label for="transport-master-vol" style="font-size:11px;color:var(--text-muted);white-space:nowrap;">主音量:</label>
+                    <input type="range" id="transport-master-vol" min="0" max="100" value="80" style="flex:1;cursor:pointer;">
+                    <span id="transport-master-vol-label" style="font-size:10px;color:var(--text-muted);min-width:24px;text-align:right;">80%</span>
+                </div>
+            </div>
+        </div>
+        <!-- Track Editor Container (replaces editor-container) -->
+        <div id="editor-container">
+            <div id="track-editor-container" style="width:100%;height:100%;"></div>
+            <textarea id="code-editor" style="display:none;"></textarea>
+        </div>
+        <!-- Bottom Panel (Debug Tools) -->
+        <div id="bottom-panel" class="hidden">
+            <div id="bottom-panel-header">
+                <div id="bottom-tabs">
+                    <button class="btab active" data-btab="output">🎧 音频输出</button>
+                    <button class="btab" data-btab="console">📋 控制台</button>
+                    <button class="btab" data-btab="network">🌐 网络</button>
+                    <button class="btab" data-btab="errors">⚠ 错误</button>
+                    <button class="btab" data-btab="debug">🐛 调试</button>
+                    <button class="btab" data-btab="procs">⚙ 进程</button>
+                    <button class="btab" data-btab="browser">🔍 预览</button>
+                </div>
+                <button id="bottom-panel-clear">🗑</button>
+                <button id="bottom-panel-close">✕</button>
+            </div>
+            <div id="bottom-panels">
+                <!-- Output (original terminal output) -->
+                <div id="bpanel-output" class="bpanel active">
+                    <div id="output-content" style="position:relative;flex:1;overflow-y:auto;min-height:0;"></div>
+                    <div style="position:relative;display:flex;align-items:stretch;">
+                        <div class="output-copy-btn" data-copy-target="output-content" title="复制输出内容" style="position:absolute;bottom:100%;left:0;">📋 复制</div>
+                        <div id="shell-input-bar" style="flex:1;">
+                            <span id="shell-prompt">muside&gt;</span>
+                            <input type="text" id="shell-input" placeholder="输入命令..." autocomplete="off" spellcheck="false" enterkeyhint="send" inputmode="text">
+                            <button id="shell-send-btn" type="button" style="padding:6px 14px;border:none;background:var(--accent);color:#fff;border-radius:6px;font-size:14px;font-weight:700;cursor:pointer;flex-shrink:0;">&#9166;</button>
+                        </div>
+                    </div>
+                </div>
+                <!-- Console -->
+                <div id="bpanel-console" class="bpanel">
+                    <div id="debug-console-content" style="flex:1;overflow-y:auto;padding:6px 8px;font-family:var(--font-mono);font-size:11px;position:relative;"></div>
+                    <div class="output-copy-btn" data-copy-target="debug-console-content" title="复制控制台内容">📋 复制</div>
+                </div>
+                <!-- Network -->
+                <div id="bpanel-network" class="bpanel">
+                    <div id="debug-network-content" style="flex:1;overflow-y:auto;padding:6px 8px;font-family:var(--font-mono);font-size:11px;position:relative;"></div>
+                    <div class="output-copy-btn" data-copy-target="debug-network-content" title="复制网络日志">📋 复制</div>
+                </div>
+                <!-- Errors -->
+                <div id="bpanel-errors" class="bpanel">
+                    <div id="debug-errors-content" style="flex:1;overflow-y:auto;padding:6px 8px;font-family:var(--font-mono);font-size:11px;position:relative;"></div>
+                    <div class="output-copy-btn" data-copy-target="debug-errors-content" title="复制错误信息">📋 复制</div>
+                </div>
+                <!-- Debugger -->
+                <div id="bpanel-debug" class="bpanel" style="flex-direction:column;">
+                    <!-- Debug Toolbar -->
+                    <div id="debug-toolbar" style="display:flex;align-items:center;gap:4px;padding:4px 8px;border-bottom:1px solid var(--border);flex-shrink:0;flex-wrap:wrap;">
+                        <span id="debug-status-text" class="debug-status-idle" style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:var(--radius-sm);flex-shrink:0;">⏸ 就绪</span>
+                        <span id="debug-position" style="font-size:10px;color:var(--text-muted);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">&nbsp;</span>
+                        <button id="debug-btn-start" title="开始调试" style="padding:3px 8px;border:none;background:var(--green);color:var(--bg-primary);border-radius:var(--radius-sm);font-size:11px;font-weight:600;cursor:pointer;">▶ 开始</button>
+                        <button id="debug-btn-stop" title="停止" style="padding:3px 8px;border:none;background:var(--red);color:var(--bg-primary);border-radius:var(--radius-sm);font-size:11px;font-weight:600;cursor:pointer;" disabled>⏹ 停止</button>
+                        <button id="debug-btn-continue" title="继续" style="padding:3px 8px;border:none;background:var(--accent);color:var(--bg-primary);border-radius:var(--radius-sm);font-size:11px;cursor:pointer;" disabled>▶ 继续</button>
+                        <button id="debug-btn-step-in" title="步进" style="padding:3px 8px;border:none;background:var(--bg-surface);color:var(--text-primary);border-radius:var(--radius-sm);font-size:11px;cursor:pointer;" disabled>⤓</button>
+                        <button id="debug-btn-step-over" title="步过" style="padding:3px 8px;border:none;background:var(--bg-surface);color:var(--text-primary);border-radius:var(--radius-sm);font-size:11px;cursor:pointer;" disabled>⤏</button>
+                        <button id="debug-btn-step-out" title="步出" style="padding:3px 8px;border:none;background:var(--bg-surface);color:var(--text-primary);border-radius:var(--radius-sm);font-size:11px;cursor:pointer;" disabled>↩</button>
+                    </div>
+                    <!-- Debug Content: two-column layout -->
+                    <div id="debug-content" style="display:flex;flex:1;overflow:hidden;min-height:0;">
+                        <!-- Left column: variables + call stack -->
+                        <div id="debug-left-col" style="width:50%;display:flex;flex-direction:column;border-right:1px solid var(--border);">
+                            <!-- Variables -->
+                            <div style="display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden;">
+                                <div style="padding:3px 8px;font-size:10px;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border);flex-shrink:0;">局部变量</div>
+                                <div id="debug-variables" style="flex:1;overflow-y:auto;padding:2px 0;font-family:var(--font-mono);font-size:11px;"></div>
+                            </div>
+                            <!-- Call Stack -->
+                            <div style="display:flex;flex-direction:column;height:120px;border-top:1px solid var(--border);">
+                                <div style="padding:3px 8px;font-size:10px;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border);flex-shrink:0;">调用栈</div>
+                                <div id="debug-callstack" style="flex:1;overflow-y:auto;padding:2px 0;font-family:var(--font-mono);font-size:11px;"></div>
+                            </div>
+                        </div>
+                        <!-- Right column: breakpoints + output + AI log -->
+                        <div id="debug-right-col" style="width:50%;display:flex;flex-direction:column;">
+                            <!-- Breakpoints -->
+                            <div style="display:flex;flex-direction:column;height:80px;border-bottom:1px solid var(--border);">
+                                <div style="padding:3px 8px;font-size:10px;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border);flex-shrink:0;">断点</div>
+                                <div id="debug-breakpoint-list" style="flex:1;overflow-y:auto;padding:2px 0;font-family:var(--font-mono);font-size:11px;"></div>
+                            </div>
+                            <!-- Output -->
+                            <div style="display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden;">
+                                <div style="padding:3px 8px;font-size:10px;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border);flex-shrink:0;">输出</div>
+                                <div id="debug-output" style="flex:1;overflow-y:auto;padding:4px 8px;font-family:var(--font-mono);font-size:11px;white-space:pre-wrap;word-break:break-all;"></div>
+                            </div>
+                            <!-- AI Debug Activity Log -->
+                            <div style="display:flex;flex-direction:column;height:100px;border-top:1px solid var(--border);">
+                                <div style="padding:3px 8px;font-size:10px;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border);flex-shrink:0;">AI 调试活动</div>
+                                <div id="debug-ai-log" style="flex:1;overflow-y:auto;padding:2px 0;font-size:11px;"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Evaluate input bar -->
+                    <div id="debug-eval-bar" style="display:flex;align-items:center;gap:4px;padding:4px 8px;border-top:1px solid var(--border);flex-shrink:0;background:var(--bg-tertiary);">
+                        <span style="color:var(--green);font-family:var(--font-mono);font-size:12px;font-weight:bold;flex-shrink:0;">&gt;&gt;&gt;</span>
+                        <input type="text" id="debug-eval-input" placeholder="输入表达式求值... (暂停时可用)" style="flex:1;padding:4px 8px;border:1px solid var(--border);background:var(--bg-primary);color:var(--text-primary);border-radius:var(--radius-sm);font-size:12px;font-family:var(--font-mono);outline:none;">
+                        <button id="debug-eval-btn" style="padding:4px 10px;border:none;background:var(--accent);color:var(--bg-primary);border-radius:var(--radius-sm);font-size:11px;cursor:pointer;">求值</button>
+                    </div>
+                </div>
+                <!-- Process Manager -->
+                <div id="bpanel-procs" class="bpanel" style="flex-direction:column;overflow:hidden;">
+                    <table id="process-table" style="width:100%;border-collapse:collapse;font-family:var(--font-mono);font-size:11px;">
+                        <thead>
+                            <tr style="border-bottom:1px solid var(--border);">
+                                <th style="padding:4px 6px;text-align:left;color:var(--text-muted);font-size:10px;font-weight:600;">ID</th>
+                                <th style="padding:4px 6px;text-align:left;color:var(--text-muted);font-size:10px;font-weight:600;">状态</th>
+                                <th style="padding:4px 6px;text-align:left;color:var(--text-muted);font-size:10px;font-weight:600;">命令</th>
+                                <th style="padding:4px 6px;text-align:left;color:var(--text-muted);font-size:10px;font-weight:600;">运行时间</th>
+                                <th style="padding:4px 6px;text-align:right;color:var(--text-muted);font-size:10px;font-weight:600;">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="process-list">
+                            <tr><td colspan="5" style="color:var(--text-muted);text-align:center;padding:20px;">无运行中的进程</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <!-- Browser Preview -->
+                <div id="bpanel-browser" class="bpanel" style="flex-direction:column;overflow:hidden;">
+                    <div id="browser-toolbar" style="display:flex;gap:4px;padding:4px 8px;border-bottom:1px solid var(--border);flex-shrink:0;align-items:center;flex-wrap:nowrap;">
+                        <input type="text" id="browser-url-input" placeholder="输入任意网址..." style="flex:1;min-width:0;padding:5px 8px;border:1px solid var(--border);background:var(--bg-tertiary);color:var(--text-primary);border-radius:var(--radius-sm);font-size:12px;font-family:var(--font-mono);">
+                        <button id="browser-go-btn" title="在预览中打开" style="padding:5px 10px;border:1px solid var(--border);background:var(--accent);color:var(--bg-primary);border-radius:var(--radius-sm);font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;">GO</button>
+                        <button id="browser-external-btn" title="在外部浏览器中打开" style="padding:5px 8px;border:1px solid var(--border);background:var(--bg-surface);color:var(--text-primary);border-radius:var(--radius-sm);font-size:12px;cursor:pointer;white-space:nowrap;">🌐</button>
+                        <button id="browser-refresh-btn" title="刷新" style="padding:5px 8px;border:1px solid var(--border);background:var(--bg-surface);color:var(--text-primary);border-radius:var(--radius-sm);font-size:12px;cursor:pointer;">↻</button>
+                        <button id="browser-inject-btn" title="注入 Bridge" style="padding:5px 8px;border:1px solid var(--border);background:var(--bg-surface);color:var(--text-primary);border-radius:var(--radius-sm);font-size:11px;cursor:pointer;white-space:nowrap;">💉</button>
+                        <button id="browser-logs-btn" title="iframe 控制台日志" style="padding:5px 8px;border:1px solid var(--border);background:var(--bg-surface);color:var(--text-primary);border-radius:var(--radius-sm);font-size:12px;cursor:pointer;">📋 日志</button>
+                        <button id="browser-console-btn" title="JS 错误控制台" style="padding:5px 8px;border:1px solid var(--border);background:var(--bg-surface);color:var(--text-primary);border-radius:var(--radius-sm);font-size:12px;cursor:pointer;">🐛 Console</button>
+                    </div>
+                    <iframe id="preview-frame" style="flex:1;border:none;background:#fff;width:100%;"></iframe>
+                    <div id="iframe-logs-panel" style="display:none;height:120px;border-top:1px solid var(--border);background:var(--bg-tertiary);flex-shrink:0;">
+                        <div style="display:flex;justify-content:space-between;align-items:center;padding:2px 8px;border-bottom:1px solid var(--border);">
+                            <span style="font-size:10px;color:var(--text-muted);">iframe 控制台</span>
+                            <button id="iframe-logs-clear" style="padding:1px 6px;border:none;background:none;color:var(--text-muted);font-size:10px;cursor:pointer;">清空</button>
+                        </div>
+                        <div id="iframe-logs" style="height:calc(100% - 22px);overflow-y:auto;padding:0;"></div>
+                    </div>
+                    <div id="iframe-console-panel" style="display:none;height:160px;border-top:1px solid var(--border);background:var(--bg-tertiary);flex-shrink:0;flex-direction:column;">
+                        <div style="display:flex;justify-content:space-between;align-items:center;padding:2px 8px;border-bottom:1px solid var(--border);flex-shrink:0;">
+                            <span style="font-size:10px;color:var(--text-muted);">🐛 JS 错误 (仅 error/uncaught)</span>
+                            <div style="display:flex;gap:4px;align-items:center;">
+                                <span id="iframe-console-count" style="font-size:10px;color:var(--red);font-weight:600;"></span>
+                                <button id="iframe-console-clear" style="padding:1px 6px;border:none;background:none;color:var(--text-muted);font-size:10px;cursor:pointer;">清空</button>
+                            </div>
+                        </div>
+                        <div id="iframe-console-errors" style="flex:1;overflow-y:auto;padding:0;min-height:0;"></div>
+                        <div style="display:flex;justify-content:flex-end;padding:4px 8px;border-top:1px solid var(--border);flex-shrink:0;">
+                            <button id="iframe-console-send-ai" style="padding:4px 12px;border:1px solid var(--accent);background:var(--accent);color:var(--bg-primary);border-radius:var(--radius-sm);font-size:11px;font-weight:600;cursor:pointer;">🤖 发送给 AI 助手</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div id="bottom-panel-resize"></div>
+        </div>
+    </main>
+
+    <!-- Right Sidebar (Chat) -->
+    <div id="sidebar-right" class="sidebar right">
+        <div id="sidebar-right-header">
+            <h3>🎵 音乐创作助手</h3>
+            <div>
+                <button id="chat-new-chat" title="新建对话">📝</button>
+                <button id="chat-history-btn" title="历史会话">📋</button>
+                <button id="chat-search-btn" title="搜索聊天记录">🔍</button>
+                <button id="chat-settings-btn" title="LLM设置">⚙️</button>
+                <button id="close-right">✕</button>
+            </div>
+        </div>
+        <div id="chat-search-bar" class="chat-search-bar hidden">
+            <input type="text" id="chat-search-input" placeholder="搜索聊天记录..." />
+            <span id="chat-search-count" class="chat-search-count"></span>
+            <button id="chat-search-prev" title="上一个匹配">▲</button>
+            <button id="chat-search-next" title="下一个匹配">▼</button>
+            <button id="chat-search-close" title="关闭搜索">✕</button>
+        </div>
+        <div id="chat-messages"></div>
+        <div id="chat-input-area">
+            <div id="chat-execute-status"></div>
+            <textarea id="chat-input" placeholder="输入消息... (Enter发送)" rows="2"></textarea>
+            <div class="chat-send-row">
+                <select id="chat-model-select" title="选择模型"></select>
+                <div id="ctx-progress-ring" class="ctx-progress-ring" title="上下文占用">
+                    <svg viewBox="0 0 36 36">
+                        <circle class="ctx-ring-bg" cx="18" cy="18" r="15.5" fill="none" stroke-width="3"/>
+                        <circle class="ctx-ring-fill" cx="18" cy="18" r="15.5" fill="none" stroke-width="3" stroke-dasharray="97.4" stroke-dashoffset="97.4" stroke-linecap="round" transform="rotate(-90 18 18)"/>
+                    </svg>
+                </div>
+                <button id="chat-send">发送</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Server Management Bar: removed (Android native bar provides this) -->
+
+    <!-- Update Dialog -->
+    <div id="update-dialog-overlay" class="hidden">
+        <div id="update-dialog">
+            <div id="update-dialog-title">⬆ Updates</div>
+            <div id="update-dialog-body">
+                <div id="update-current-version"></div>
+                <div id="update-status"></div>
+                <div id="update-info" class="hidden"></div>
+                <div id="update-token-section">
+                    <label for="update-github-token">GitHub Token (仅私有仓库需要):</label>
+                    <div style="display:flex;gap:6px;margin-top:4px;">
+                        <input type="password" id="update-github-token" placeholder="公开仓库无需填写" style="flex:1;padding:6px 8px;border-radius:6px;border:1px solid #555;background:#2a2a2a;color:#ddd;font-size:13px;">
+                        <button id="update-save-token" class="btn-secondary" style="padding:6px 12px;font-size:12px;white-space:nowrap;">保存</button>
+                    </div>
+                </div>
+            </div>
+            <div id="update-dialog-actions">
+                <button id="update-check-btn" class="btn-secondary">检查更新</button>
+                <button id="update-diagnose-btn" class="btn-secondary">🔧 诊断</button>
+                <button id="update-apply-btn" class="btn-primary hidden">立即更新</button>
+                <button id="update-close-btn" class="btn-secondary">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Overlays/Modals -->
+    <div id="overlay" class="hidden"></div>
+
+    <!-- Dialogs -->
+    <div id="dialog-overlay" class="hidden">
+        <div id="dialog">
+            <div id="dialog-title"></div>
+            <div id="dialog-body"></div>
+            <div id="dialog-buttons"></div>
+        </div>
+    </div>
+
+    <!-- Toast notification -->
+    <div id="toast" class="hidden"></div>
+
+    <!-- Server Management Styles (web mgmt bar removed, Android native bar used instead) -->
+    <style>
+        /* Log Viewer Panel */
+        #log-viewer-panel {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 250px;
+            background: var(--bg-surface, #2d2620);
+            border-top: 1px solid var(--border, #3a3228);
+            display: flex;
+            flex-direction: column;
+            z-index: 399;
+            box-shadow: 0 -4px 16px rgba(0,0,0,0.4);
+            animation: slideUp 0.2s ease;
+        }
+        @keyframes slideUp {
+            from { transform: translateY(100%); }
+            to { transform: translateY(0); }
+        }
+    /* Update Dialog */
+        #update-dialog-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.6);
+            z-index: 500;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 16px;
+            animation: fadeIn 0.2s ease;
+        }
+        #update-dialog-overlay.hidden {
+            display: none;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        #update-dialog {
+            background: var(--bg-surface, #2d2620);
+            border: 1px solid var(--border, #3a3228);
+            border-radius: var(--radius, 8px);
+            width: 100%;
+            max-width: 360px;
+            box-shadow: 0 16px 48px rgba(0,0,0,0.5);
+            overflow: hidden;
+        }
+        #update-dialog-title {
+            padding: 14px 16px 8px;
+            font-weight: 600;
+            font-size: 15px;
+            color: var(--text-primary, #f8f8f2);
+        }
+        #update-dialog-body {
+            padding: 8px 16px 14px;
+            min-height: 60px;
+        }
+        #update-current-version {
+            font-size: 12px;
+            color: var(--text-muted, #666);
+            font-family: var(--font-mono, monospace);
+        }
+        #update-status {
+            font-size: 13px;
+            color: var(--text-secondary, #aaa);
+            margin-top: 8px;
+        }
+        #update-info {
+            margin-top: 10px;
+            padding: 10px;
+            background: rgba(0,0,0,0.2);
+            border-radius: var(--radius-sm, 4px);
+            font-size: 12px;
+            font-family: var(--font-mono, monospace);
+            color: var(--text-secondary, #aaa);
+            line-height: 1.5;
+        }
+        #update-info.hidden {
+            display: none;
+        }
+        #update-token-section {
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid rgba(255,255,255,0.1);
+        }
+        #update-token-section label {
+            font-size: 12px;
+            color: var(--text-muted, #888);
+        }
+        .update-progress-bar {
+            height: 4px;
+            background: var(--bg-hover, #3a3228);
+            border-radius: 2px;
+            margin-top: 10px;
+            overflow: hidden;
+        }
+        .update-progress-fill {
+            height: 100%;
+            background: var(--accent, #e8853d);
+            border-radius: 2px;
+            transition: width 0.3s ease;
+            width: 0%;
+        }
+        #update-dialog-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+            padding: 8px 16px 14px;
+        }
+        #update-dialog-actions button {
+            padding: 8px 16px;
+            border: none;
+            border-radius: var(--radius-sm, 4px);
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            transition: background 0.15s, transform 0.1s;
+        }
+        #update-dialog-actions button:active {
+            transform: scale(0.95);
+        }
+        .btn-primary {
+            background: var(--accent, #e8853d);
+            color: var(--bg-primary, #1e1e2e);
+        }
+        .btn-primary:hover {
+            filter: brightness(1.1);
+        }
+        .btn-secondary {
+            background: var(--bg-hover, #3a3228);
+            color: var(--text-secondary, #aaa);
+        }
+        .btn-secondary:hover {
+            background: var(--bg-active, #4a3f33);
+            color: var(--text-primary, #f8f8f2);
+        }
+        .hidden {
+            display: none;
+        }
+    </style>
+
+    <!-- Markdown Renderer (bundled locally) -->
+    <script src="/vendor/marked/marked.min.js"></script>
+
+    <!-- Track Editor Module -->
+    <script src="/js/track-editor.js"></script>
+
+    <!-- App Scripts -->
+    <script src="/js/project.js"></script>
+    <script src="/js/files.js"></script>
+    <script src="/js/git.js?v=3"></script>
+    <script src="/js/search.js"></script>
+    <script src="/js/terminal.js"></script>
+    <script src="/js/browser.js"></script>
+    <script src="/js/chat.js"></script>
+    <script src="/js/editor.js"></script>
+    <script src="/js/debug.js"></script>
+    <script src="/js/debugger.js"></script>
+    <script src="/js/app.js"></script>
+
+    <!-- Copyright Footer -->
+    <footer id="copyright-footer">Copyright 2026 MusIDE. All Rights Reserved.</footer>
+</body>
+</html>

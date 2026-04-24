@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>多选功能演示</title>
+    <link rel="stylesheet" href="/css/style.css">
+    <link rel="stylesheet" href="/vendor/codemirror/codemirror.min.css">
+    <link rel="stylesheet" href="/vendor/codemirror/theme/dracula.min.css">
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1e1e1e;
+            color: #fff;
+        }
+        
+        .demo-container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        .demo-header {
+            background: #2d2d2d;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        
+        .demo-header h1 {
+            margin: 0 0 10px 0;
+            color: #fff;
+        }
+        
+        .demo-header p {
+            margin: 0;
+            color: #ccc;
+            line-height: 1.6;
+        }
+        
+        .key-combo {
+            background: #3d3d3d;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: monospace;
+            color: #fff;
+            border: 1px solid #555;
+        }
+        
+        .editor-container {
+            background: #2d2d2d;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }
+        
+        .editor-toolbar {
+            background: #3d3d3d;
+            padding: 10px 15px;
+            border-bottom: 1px solid #555;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        
+        .toolbar-btn {
+            background: #4d4d4d;
+            color: #fff;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: background 0.2s;
+        }
+        
+        .toolbar-btn:hover {
+            background: #5d5d5d;
+        }
+        
+        .toolbar-btn.active {
+            background: #007acc;
+        }
+        
+        #demo-editor {
+            height: 400px;
+        }
+        
+        .status-bar {
+            background: #3d3d3d;
+            border-top: 1px solid #555;
+            padding: 8px 15px;
+            font-size: 12px;
+            color: #ccc;
+            display: flex;
+            gap: 15px;
+        }
+        
+        .status-separator {
+            color: #666;
+        }
+        
+        .demo-footer {
+            margin-top: 20px;
+            background: #2d2d2d;
+            padding: 15px;
+            border-radius: 8px;
+        }
+        
+        .demo-footer h3 {
+            margin: 0 0 10px 0;
+            color: #fff;
+        }
+        
+        .demo-footer ul {
+            margin: 0;
+            padding-left: 20px;
+            color: #ccc;
+        }
+        
+        .demo-footer li {
+            margin-bottom: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="demo-container">
+        <div class="demo-header">
+            <h1>🎯 多选功能演示</h1>
+            <p>
+                这是一个轻量级多选功能的演示。使用 <span class="key-combo">Alt+点击</span> 添加多个光标，
+                <span class="key-combo">Alt+A</span> 选择所有相同词汇，<span class="key-combo">Esc</span> 退出多选模式。
+            </p>
+        </div>
+        
+        <div class="editor-container">
+            <div class="editor-toolbar">
+                <button class="toolbar-btn" onclick="clearEditor()">清空编辑器</button>
+                <button class="toolbar-btn" onclick="loadSample()">加载示例</button>
+                <button class="toolbar-btn" onclick="toggleMultiSelect()">切换多选</button>
+                <span style="margin-left: auto; color: #888;">多选状态: <span id="multi-select-status">关闭</span></span>
+            </div>
+            
+            <textarea id="demo-editor"></textarea>
+            
+            <div class="status-bar">
+                <span>行: <span id="line-num">1</span>, 列: <span id="col-num">1</span></span>
+                <span class="status-separator">|</span>
+                <span>模式: <span id="mode-status">Plain Text</span></span>
+                <span class="status-separator">|</span>
+                <span>光标: <span id="cursor-count">1</span></span>
+            </div>
+        </div>
+        
+        <div class="demo-footer">
+            <h3>📖 使用说明</h3>
+            <ul>
+                <li><strong>Alt + 点击</strong> - 在点击位置添加新光标</li>
+                <li><strong>Alt + A</strong> - 选择所有相同词汇的匹配项</li>
+                <li><strong>Shift + Alt + ↑/↓</strong> - 在上方/下方添加光标</li>
+                <li><strong>Esc</strong> - 退出多选模式</li>
+                <li><strong>矩形选择</strong> - 支持按住 Alt 键进行矩形选择</li>
+                <li><strong>移动端支持</strong> - 使用 Ctrl + 点击替代 Alt + 点击</li>
+            </ul>
+        </div>
+    </div>
+
+    <!-- CodeMirror 5 -->
+    <script src="/vendor/codemirror/codemirror.min.js"></script>
+    <script src="/vendor/codemirror/mode/javascript/javascript.min.js"></script>
+    <script src="/vendor/codemirror/mode/python/python.min.js"></script>
+    <script src="/vendor/codemirror/mode/htmlmixed/htmlmixed.min.js"></script>
+    <script src="/vendor/codemirror/mode/css/css.min.js"></script>
+    <script src="/vendor/codemirror/mode/markdown/markdown.min.js"></script>
+    <script src="/vendor/codemirror/addon/edit/closebrackets.min.js"></script>
+    <script src="/vendor/codemirror/addon/edit/matchbrackets.min.js"></script>
+    <script src="/vendor/codemirror/addon/selection/active-line.min.js"></script>
+    <script src="/vendor/codemirror/addon/search/search.min.js"></script>
+    <script src="/vendor/codemirror/addon/search/searchcursor.min.js"></script>
+    <script src="/vendor/codemirror/addon/dialog/dialog.min.js"></script>
+    <script src="/vendor/codemirror/addon/hint/show-hint.min.js"></script>
+    <script src="/vendor/codemirror/addon/fold/foldcode.min.js"></script>
+    <script src="/vendor/codemirror/addon/fold/foldgutter.min.js"></script>
+    <script src="/vendor/codemirror/addon/fold/indent-fold.min.js"></script>
+    <script src="/vendor/codemirror/addon/fold/comment-fold.min.js"></script>
+    <script src="/vendor/codemirror/addon/comment/comment.min.js"></script>
+    <script src="/vendor/codemirror/addon/display/placeholder.min.js"></script>
+
+    <script>
+        // 简化的多选功能演示
+        let editor = null;
+        let multiSelectMode = false;
+        let multiCursors = [];
+        
+        function initEditor() {
+            editor = CodeMirror.fromTextArea(document.getElementById('demo-editor'), {
+                theme: 'dracula',
+                lineNumbers: true,
+                lineWrapping: true,
+                mode: 'javascript',
+                placeholder: '// 开始编写代码，体验多选功能...',
+                extraKeys: {
+                    'Alt-Click': (cm, event) => {
+                        event.preventDefault();
+                        handleMultiSelectClick(event);
+                    },
+                    'Ctrl-Click': (cm, event) => {
+                        event.preventDefault();
+                        handleMultiSelectClick(event);
+                    },
+                    'Alt-A': (cm) => {
+                        selectAllOccurrences();
+                    },
+                    'Escape': (cm) => {
+                        if (multiSelectMode) {
+                            exitMultiSelect();
+                        }
+                    },
+                    'Shift-Alt-Up': (cm) => {
+                        if (multiSelectMode) {
+                            addCursorAbove();
+                        }
+                    },
+                    'Shift-Alt-Down': (cm) => {
+                        if (multiSelectMode) {
+                            addCursorBelow();
+                        }
+                    }
+                }
+            });
+            
+            editor.on('cursorActivity', updateStatusBar);
+            updateStatusBar();
+        }
+        
+        function handleMultiSelectClick(event) {
+            if (!editor) return;
+            
+            const pos = editor.coordsChar({
+                left: event.clientX,
+                top: event.clientY
+            });
+            
+            if (multiSelectMode) {
+                addCursorAt(pos.line, pos.ch);
+            } else {
+                enterMultiSelect(pos.line, pos.ch);
+            }
+        }
+        
+        function enterMultiSelect(line, ch) {
+            multiSelectMode = true;
+            multiCursors = [{line, ch}];
+            updateMultiSelectDisplay();
+            updateStatusBar();
+        }
+        
+        function exitMultiSelect() {
+            multiSelectMode = false;
+            multiCursors = [];
+            editor.refresh();
+            updateStatusBar();
+        }
+        
+        function addCursorAt(line, ch) {
+            if (multiCursors.length >= 50) {
+                showNotification('最多支持50个光标');
+                return;
+            }
+            
+            const exists = multiCursors.some(cursor => cursor.line === line && cursor.ch === ch);
+            if (!exists) {
+                multiCursors.push({line, ch});
+                updateMultiSelectDisplay();
+                updateStatusBar();
+            }
+        }
+        
+        function addCursorAbove() {
+            if (multiCursors.length === 0) return;
+            const activeCursor = multiCursors[multiCursors.length - 1];
+            const newLine = Math.max(0, activeCursor.line - 1);
+            addCursorAt(newLine, activeCursor.ch);
+        }
+        
+        function addCursorBelow() {
+            if (multiCursors.length === 0) return;
+            const activeCursor = multiCursors[multiCursors.length - 1];
+            const newLine = Math.min(editor.lineCount() - 1, activeCursor.line + 1);
+            addCursorAt(newLine, activeCursor.ch);
+        }
+        
+        function selectAllOccurrences() {
+            if (!editor) return;
+            
+            const selection = editor.getSelection();
+            const searchTerm = selection || getWordUnderCursor();
+            
+            if (!searchTerm) return;
+            
+            const occurrences = [];
+            const doc = editor.getDoc();
+            
+            for (let i = 0; i < doc.lineCount(); i++) {
+                const line = doc.getLine(i);
+                let pos = 0;
+                
+                while (pos < line.length) {
+                    const index = line.indexOf(searchTerm, pos);
+                    if (index === -1) break;
+                    
+                    occurrences.push({line: i, ch: index});
+                    pos = index + 1;
+                }
+            }
+            
+            if (occurrences.length > 0) {
+                multiSelectMode = true;
+                multiCursors = occurrences;
+                updateMultiSelectDisplay();
+                updateStatusBar();
+            }
+        }
+        
+        function getWordUnderCursor() {
+            const cursor = editor.getCursor();
+            const line = editor.getLine(cursor.line);
+            const pos = cursor.ch;
+            
+            const left = line.slice(0, pos);
+            const right = line.slice(pos);
+            
+            const leftMatch = left.match(/\w*$/);
+            const rightMatch = right.match(/^\w*/);
+            
+            if (leftMatch && rightMatch) {
+                return leftMatch[0] + rightMatch[0];
+            }
+            
+            return '';
+        }
+        
+        function updateMultiSelectDisplay() {
+            if (!editor) return;
+            
+            // CodeMirror 5 不支持真正的多光标，这里只是模拟
+            editor.refresh();
+        }
+        
+        function updateStatusBar() {
+            if (!editor) return;
+            
+            const cursor = editor.getCursor();
+            const line = cursor.line + 1;
+            const col = cursor.ch + 1;
+            const totalLines = editor.lineCount();
+            
+            document.getElementById('line-num').textContent = line;
+            document.getElementById('col-num').textContent = col;
+            document.getElementById('cursor-count').textContent = multiCursors.length;
+            document.getElementById('multi-select-status').textContent = multiSelectMode ? '开启' : '关闭';
+            
+            const mode = editor.getOption('mode');
+            const modeNames = {
+                'javascript': 'JavaScript',
+                'python': 'Python',
+                'htmlmixed': 'HTML',
+                'css': 'CSS',
+                'markdown': 'Markdown',
+                'text/plain': 'Plain Text'
+            };
+            document.getElementById('mode-status').textContent = modeNames[mode] || 'Plain Text';
+        }
+        
+        function showNotification(message) {
+            const notification = document.createElement('div');
+            notification.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                background: #333;
+                color: white;
+                padding: 10px 15px;
+                border-radius: 5px;
+                font-size: 14px;
+                z-index: 10000;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+                animation: slideIn 0.3s ease-out;
+            `;
+            notification.textContent = message;
+            document.body.appendChild(notification);
+            
+            setTimeout(() => {
+                if (notification.parentNode) {
+                    notification.parentNode.removeChild(notification);
+                }
+            }, 3000);
+        }
+        
+        function clearEditor() {
+            if (editor) {
+                editor.setValue('');
+            }
+        }
+        
+        function loadSample() {
+            const sampleCode = `// 多选功能演示
+function calculateSum(a, b) {
+    return a + b;
+}
+
+function calculateProduct(a, b) {
+    return a * b;
+}
+
+function calculateDifference(a, b) {
+    return a - b;
+}
+
+// 使用示例
+const result1 = calculateSum(10, 20);
+const result2 = calculateProduct(5, 8);
+const result3 = calculateDifference(15, 7);`;
+            
+            if (editor) {
+                editor.setValue(sampleCode);
+            }
+        }
+        
+        function toggleMultiSelect() {
+            if (multiSelectMode) {
+                exitMultiSelect();
+            } else {
+                if (editor.getValue()) {
+                    selectAllOccurrences();
+                }
+            }
+        }
+        
+        // 初始化编辑器
+        document.addEventListener('DOMContentLoaded', initEditor);
+    </script>
+
+    <!-- Copyright Footer -->
+    <footer style="position:fixed;bottom:0;left:0;right:0;height:24px;background:#2d2d2d;color:#888;font-size:11px;display:flex;align-items:center;justify-content:center;border-top:1px solid #555;z-index:50;user-select:none;-webkit-user-select:none;">Copyright 2026 朱东山. All Rights Reserved.</footer>
+</body>
+</html>

@@ -1,0 +1,1 @@
+# MusIDE\n\nMusic Production IDE - AI-powered music creation assistant with multi-track editor, waveform display, and intelligent music composition tools.\n\nBuilt from [PhoneIDE](https://github.com/ctz168/ide).
