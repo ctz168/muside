@@ -3781,7 +3781,7 @@ def _run_subagent(task, mode='read', max_iterations=8, llm_config=None, context=
                 'model': llm_config.get('model', 'gpt-4o-mini'),
                 'messages': api_messages,
                 'temperature': 0.3,
-                'max_tokens': 4096,
+                'max_tokens': 100000,
                 'tools': sub_tool_defs,
                 'tool_choice': 'auto',
             }
@@ -4718,7 +4718,7 @@ def _call_llm_api(messages, llm_config, stream=False):
     """Make a non-streaming LLM API call. Returns parsed response dict."""
     model = llm_config.get('model', 'gpt-4o-mini')
     temperature = llm_config.get('temperature', 0.7)
-    max_tokens = llm_config.get('max_tokens', 4096)
+    max_tokens = llm_config.get('max_tokens', 100000)
 
     api_messages = _build_api_messages(messages, llm_config)
 
@@ -4792,7 +4792,7 @@ def _call_llm_stream_raw(messages, llm_config, tools_level='full'):
 
     model = llm_config.get('model', 'gpt-4o-mini')
     temperature = llm_config.get('temperature', 0.7)
-    max_tokens = llm_config.get('max_tokens', 4096)
+    max_tokens = llm_config.get('max_tokens', 100000)
     reasoning = llm_config.get('reasoning', True)
 
     api_messages = _build_api_messages(messages, llm_config)
@@ -4995,9 +4995,9 @@ def _get_context_budget(llm_config):
     """
     max_context = llm_config.get('max_context', 0)
     if max_context > 0:
-        max_output = llm_config.get('max_tokens', 4096)
+        max_output = llm_config.get('max_tokens', 100000)
         return max(max_context - max_output - 4000, 8000)  # safety margin + minimum floor
-    return llm_config.get('max_tokens', 4096) * 10
+    return llm_config.get('max_tokens', 100000) * 10
 
 
 # ==================== AI-Powered History Summarization ====================
@@ -5116,7 +5116,7 @@ def _ai_summarize_messages(messages, llm_config):
             'model': llm_config.get('model'),
             'messages': [{'role': 'user', 'content': summary_prompt}],
             'temperature': 0.3,  # Low temperature for factual summarization
-            'max_tokens': min(2000, llm_config.get('max_tokens', 4096)),
+            'max_tokens': min(2000, llm_config.get('max_tokens', 100000)),
         }
         
         body_bytes = json.dumps(payload, ensure_ascii=False, separators=(',', ':')).encode('utf-8')

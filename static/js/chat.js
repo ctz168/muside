@@ -2634,7 +2634,7 @@ Do NOT execute any tools. Only generate the plan.\n\nUser request: `;
                                     <input type="number" class="llm-temperature" data-idx="${idx}" min="0" max="2" step="0.1" value="${m.temperature !== undefined ? m.temperature : '0.7'}">
                                 </label>
                                 <label><span>Max Tokens</span>
-                                    <input type="number" class="llm-max-tokens" data-idx="${idx}" min="256" max="128000" step="256" value="${m.max_tokens || '4096'}">
+                                    <input type="number" class="llm-max-tokens" data-idx="${idx}" min="256" max="200000" step="256" value="${m.max_tokens || '100000'}">
                                 </label>
                                 <label><span>最大上下文</span>
                                     <input type="number" class="llm-max-context" data-idx="${idx}" min="1024" max="2000000" step="1024" value="${m.max_context || '128000'}">
@@ -2725,7 +2725,7 @@ Do NOT execute any tools. Only generate the plan.\n\nUser request: `;
                 input.addEventListener('change', () => { workingModels[parseInt(input.dataset.idx)].temperature = parseFloat(input.value) || 0.7; });
             });
             list.querySelectorAll('.llm-max-tokens').forEach(input => {
-                input.addEventListener('change', () => { workingModels[parseInt(input.dataset.idx)].max_tokens = parseInt(input.value, 10) || 4096; });
+                input.addEventListener('change', () => { workingModels[parseInt(input.dataset.idx)].max_tokens = parseInt(input.value, 10) || 100000; });
             });
             list.querySelectorAll('.llm-max-context').forEach(input => {
                 input.addEventListener('change', () => { workingModels[parseInt(input.dataset.idx)].max_context = parseInt(input.value, 10) || 128000; });
@@ -2759,7 +2759,7 @@ Do NOT execute any tools. Only generate the plan.\n\nUser request: `;
                 workingModels[parseInt(input.dataset.idx)].temperature = parseFloat(input.value) || 0.7;
             });
             overlay.querySelectorAll('.llm-max-tokens').forEach(input => {
-                workingModels[parseInt(input.dataset.idx)].max_tokens = parseInt(input.value, 10) || 4096;
+                workingModels[parseInt(input.dataset.idx)].max_tokens = parseInt(input.value, 10) || 100000;
             });
             overlay.querySelectorAll('.llm-max-context').forEach(input => {
                 workingModels[parseInt(input.dataset.idx)].max_context = parseInt(input.value, 10) || 128000;
@@ -2782,7 +2782,7 @@ Do NOT execute any tools. Only generate the plan.\n\nUser request: `;
                 model: '',
                 enabled: false,
                 temperature: 0.7,
-                max_tokens: 4096,
+                max_tokens: 100000,
                 max_context: 128000,
                 reasoning: true,
             });

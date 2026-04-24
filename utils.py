@@ -106,7 +106,7 @@ DEFAULT_LLM_MODELS = [
         'model': 'gpt-4o-mini',
         'enabled': True,
         'temperature': 0.7,
-        'max_tokens': 4096,
+        'max_tokens': 100000,
         'max_context': 128000,
         'reasoning': True,
     },
@@ -119,7 +119,7 @@ DEFAULT_LLM_MODELS = [
         'model': 'claude-sonnet-4-20250514',
         'enabled': False,
         'temperature': 0.7,
-        'max_tokens': 4096,
+        'max_tokens': 100000,
         'max_context': 200000,
         'reasoning': True,
     },
@@ -132,7 +132,7 @@ DEFAULT_LLM_MODELS = [
         'model': 'llama3',
         'enabled': False,
         'temperature': 0.7,
-        'max_tokens': 4096,
+        'max_tokens': 100000,
         'max_context': 128000,
         'reasoning': True,
     },
@@ -145,7 +145,7 @@ DEFAULT_LLM_MODELS = [
         'model': 'stepfun-ai/Step-3.5-Flash',
         'enabled': False,
         'temperature': 0.7,
-        'max_tokens': 16384,
+        'max_tokens': 100000,
         'max_context': 128000,
         'reasoning': True,
     },
@@ -169,7 +169,7 @@ def load_llm_config():
                 'model': config.get('model', 'gpt-4o-mini'),
                 'enabled': True,
                 'temperature': config.get('temperature', 0.7),
-                'max_tokens': config.get('max_tokens', 4096),
+                'max_tokens': config.get('max_tokens', 100000),
                 'max_context': 128000,
                 'reasoning': True,
             }
@@ -221,7 +221,7 @@ def get_active_llm_config(config=None):
     return {
         'provider': 'openai', 'api_type': 'openai', 'api_key': '',
         'api_base': '', 'model': 'gpt-4o-mini', 'temperature': 0.7,
-        'max_tokens': 4096, 'system_prompt': system_prompt,
+        'max_tokens': 100000, 'system_prompt': system_prompt,
     }
 
 
