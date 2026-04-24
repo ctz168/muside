@@ -49,7 +49,7 @@ else:
     print("ERROR: Could not find AGENT_TOOLS")
     sys.exit(1)
 
-_IDE_PORT = os.environ.get('MUSIDE_PORT', '12345')
+_IDE_PORT = os.environ.get('MUSIDE_PORT', '12346')
 
 SYSTEM_PROMPT = f"""You are MusIDE AI Agent, a powerful coding assistant integrated in a mobile IDE.
 You have access to specialized tools for reading, writing, editing, searching, and managing code projects.

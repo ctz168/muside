@@ -71,7 +71,7 @@ _SYSTEM_ENV_INFO = get_system_info()
 _PLATFORM_NAME = 'Windows' if IS_WINDOWS else ('macOS' if platform.system() == 'Darwin' else 'Linux')
 _DEFAULT_COMPILER = 'python' if IS_WINDOWS else 'python3'
 _SERVER_DIR = SERVER_DIR
-_IDE_PORT = os.environ.get('MUSIDE_PORT', '12345')
+_IDE_PORT = os.environ.get('MUSIDE_PORT', '12346')
 
 RING_BUFFER_SIZE = 100
 
@@ -1051,6 +1051,134 @@ AGENT_TOOLS = [
             'description': 'Get current project state: BPM, time signature, tracks, duration, etc.',
             'parameters': {'type': 'object', 'properties': {}, 'required': []},
         },
+    },
+    # -- Lyrics & Vocal --
+    {
+        'type': 'function',
+        'function': {
+            'name': 'edit_lyrics',
+            'description': '编辑轨道歌词。支持设置时间戳歌词行，歌词将在时间轴上对应位置显示。',
+            'parameters': {
+                'type': 'object',
+                'properties': {
+                    'track_id': {'type': 'string', 'description': '轨道ID'},
+                    'lyrics': {'type': 'array', 'description': '歌词行数组', 'items': {
+                        'type': 'object',
+                        'properties': {
+                            'time': {'type': 'number', 'description': '开始时间（秒）'},
+                            'text': {'type': 'string', 'description': '歌词文本'}
+                        },
+                        'required': ['time', 'text']
+                    }},
+                },
+                'required': ['track_id', 'lyrics'],
+            }
+        }
+    },
+    {
+        'type': 'function',
+        'function': {
+            'name': 'synthesize_vocals',
+            'description': '使用合成引擎生成歌声。基于音轨的音色设置，将音符序列合成为声音。',
+            'parameters': {
+                'type': 'object',
+                'properties': {
+                    'track_id': {'type': 'string', 'description': '轨道ID'},
+                    'notes': {'type': 'array', 'description': '音符序列', 'items': {
+                        'type': 'object',
+                        'properties': {
+                            'pitch': {'type': 'number', 'description': 'MIDI音高 (0-127, 60=C4)'},
+                            'start_time': {'type': 'number', 'description': '开始时间（秒）'},
+                            'duration': {'type': 'number', 'description': '持续时间（秒）'}
+                        },
+                        'required': ['pitch', 'start_time', 'duration']
+                    }},
+                    'voice_type': {'type': 'string', 'enum': ['soprano', 'alto', 'tenor', 'bass'], 'description': '声部类型'}
+                },
+                'required': ['track_id', 'notes'],
+            }
+        }
+    },
+    # -- Timbre --
+    {
+        'type': 'function',
+        'function': {
+            'name': 'set_timbre',
+            'description': '设置轨道音色参数。包括波形类型、ADSR包络、滤波器、音高偏移等。',
+            'parameters': {
+                'type': 'object',
+                'properties': {
+                    'track_id': {'type': 'string', 'description': '轨道ID'},
+                    'waveform': {'type': 'string', 'enum': ['sine', 'square', 'sawtooth', 'triangle'], 'description': '波形类型'},
+                    'attack': {'type': 'number', 'description': '起音时间（0-2秒）'},
+                    'decay': {'type': 'number', 'description': '衰减时间（0-2秒）'},
+                    'sustain': {'type': 'number', 'description': '持续电平（0-1）'},
+                    'release': {'type': 'number', 'description': '释放时间（0-2秒）'},
+                    'filter_freq': {'type': 'number', 'description': '滤波器截止频率（20-20000Hz）'},
+                    'filter_q': {'type': 'number', 'description': '滤波器Q值（0.1-30）'},
+                    'pitch_shift': {'type': 'number', 'description': '音高偏移（-24到+24半音）'}
+                },
+                'required': ['track_id'],
+            }
+        }
+    },
+    {
+        'type': 'function',
+        'function': {
+            'name': 'get_timbre',
+            'description': '获取轨道音色参数设置。',
+            'parameters': {
+                'type': 'object',
+                'properties': {
+                    'track_id': {'type': 'string', 'description': '轨道ID'}
+                },
+                'required': ['track_id'],
+            }
+        }
+    },
+    # -- Beat Control --
+    {
+        'type': 'function',
+        'function': {
+            'name': 'set_swing',
+            'description': '设置全局摇摆（Swing）量。Swing为0时是标准节拍，增加后偶数拍会延后，产生摇摆感。',
+            'parameters': {
+                'type': 'object',
+                'properties': {
+                    'amount': {'type': 'number', 'description': '摇摆量（0-1，0=无摇摆，1=三连音摇摆）'}
+                },
+                'required': ['amount'],
+            }
+        }
+    },
+    {
+        'type': 'function',
+        'function': {
+            'name': 'quantize',
+            'description': '量化音符到最近的节拍网格。将音符时间对齐到指定精度的网格线上。',
+            'parameters': {
+                'type': 'object',
+                'properties': {
+                    'track_id': {'type': 'string', 'description': '轨道ID'},
+                    'grid': {'type': 'string', 'enum': ['1/4', '1/8', '1/16', '1/32'], 'description': '量化精度'}
+                },
+                'required': ['track_id', 'grid'],
+            }
+        }
+    },
+    {
+        'type': 'function',
+        'function': {
+            'name': 'set_humanize',
+            'description': '设置人性化参数。为节拍添加微小随机偏移，使声音更自然。',
+            'parameters': {
+                'type': 'object',
+                'properties': {
+                    'amount': {'type': 'number', 'description': '人性化量（0-0.1秒随机偏移）'}
+                },
+                'required': ['amount'],
+            }
+        }
     },
 ]
 
@@ -2104,7 +2232,7 @@ def _tool_run_command(args):
             _suggestion = f'💡 Tip: `{better_tool}` is more efficient here — {why}.\n\n'
 
     # SAFETY: Block commands that would kill the IDE server
-    ide_port = os.environ.get('MUSIDE_PORT', '12345')
+    ide_port = os.environ.get('MUSIDE_PORT', '12346')
     cmd_lower = command.lower()
     # Check for dangerous combinations: a kill command + IDE port or server name
     has_kill = any(p in cmd_lower for p in ['kill', 'pkill', 'killall', 'taskkill', 'fuser -k'])
@@ -2579,7 +2707,7 @@ def _tool_server_logs(args):
     count = args.get('count', 50)
     try:
         import urllib.request as _urllib_req
-        port = os.environ.get('PORT', '1239')
+        port = os.environ.get('PORT', '12346')
         req_data = json.dumps({'count': count}).encode()
         req = _urllib_req.Request(
             f'http://localhost:{port}/api/server/logs',
@@ -3854,7 +3982,7 @@ def _tool_kill_port(args):
         return f'Error: port must be between 1 and 65535, got {port}'
 
     # SAFETY: Never kill the IDE's own port
-    ide_port = int(os.environ.get('MUSIDE_PORT', 12345))
+    ide_port = int(os.environ.get('MUSIDE_PORT', 12346))
     if port == ide_port:
         return f'⛔ BLOCKED: Port {port} is the MusIDE server port — killing it would shut down the IDE and AI assistant. Operation refused.'
 
@@ -4053,6 +4181,116 @@ def _tool_get_project_info(args):
         'bit_depth': 16,
     }, ensure_ascii=False)
 
+def _tool_edit_lyrics(args):
+    track_id = args.get('track_id', '')
+    lyrics = args.get('lyrics', [])
+    if not track_id:
+        return '错误: 缺少 track_id 参数'
+    if not isinstance(lyrics, list):
+        return '错误: lyrics 必须是数组'
+    # Validate lyrics entries
+    valid_lyrics = []
+    for line in lyrics:
+        if isinstance(line, dict) and 'time' in line and 'text' in line:
+            valid_lyrics.append({'time': float(line['time']), 'text': str(line['text'])})
+    valid_lyrics.sort(key=lambda x: x['time'])
+    return f'已设置轨道 {track_id} 的歌词，共 {len(valid_lyrics)} 行。歌词将在前端编辑器中显示。'
+
+def _tool_synthesize_vocals(args):
+    track_id = args.get('track_id', '')
+    notes = args.get('notes', [])
+    voice_type = args.get('voice_type', 'soprano')
+    if not track_id:
+        return '错误: 缺少 track_id 参数'
+    if not isinstance(notes, list) or len(notes) == 0:
+        return '错误: 需要至少一个音符'
+    # Validate notes
+    valid_count = 0
+    for note in notes:
+        if isinstance(note, dict) and 'pitch' in note and 'start_time' in note and 'duration' in note:
+            valid_count += 1
+    # Voice type ranges
+    voice_ranges = {
+        'soprano': '女高音 (C4-G5)',
+        'alto': '女低音 (G3-D5)',
+        'tenor': '男高音 (C3-G4)',
+        'bass': '男低音 (E2-C4)',
+    }
+    range_info = voice_ranges.get(voice_type, '未知声部')
+    return f'已在轨道 {track_id} 上合成歌声：{valid_count} 个音符，声部：{range_info}。合成引擎将在前端播放。'
+
+def _tool_set_timbre(args):
+    track_id = args.get('track_id', '')
+    if not track_id:
+        return '错误: 缺少 track_id 参数'
+    params = {}
+    if 'waveform' in args:
+        if args['waveform'] not in ('sine', 'square', 'sawtooth', 'triangle'):
+            return '错误: waveform 必须是 sine/square/sawtooth/triangle'
+        params['waveform'] = args['waveform']
+    if 'attack' in args:
+        params['attack'] = max(0, min(2, float(args['attack'])))
+    if 'decay' in args:
+        params['decay'] = max(0, min(2, float(args['decay'])))
+    if 'sustain' in args:
+        params['sustain'] = max(0, min(1, float(args['sustain'])))
+    if 'release' in args:
+        params['release'] = max(0, min(2, float(args['release'])))
+    if 'filter_freq' in args:
+        params['filterFreq'] = max(20, min(20000, float(args['filter_freq'])))
+    if 'filter_q' in args:
+        params['filterQ'] = max(0.1, min(30, float(args['filter_q'])))
+    if 'pitch_shift' in args:
+        params['pitchShift'] = max(-24, min(24, int(args['pitch_shift'])))
+    return f'已设置轨道 {track_id} 的音色参数：{params}。参数将在前端合成引擎中生效。'
+
+def _tool_get_timbre(args):
+    track_id = args.get('track_id', '')
+    if not track_id:
+        return '错误: 缺少 track_id 参数'
+    # Return default timbre (frontend will merge with actual track state)
+    return json.dumps({
+        'track_id': track_id,
+        'timbre': {
+            'waveform': 'sine',
+            'attack': 0.05,
+            'decay': 0.1,
+            'sustain': 0.7,
+            'release': 0.3,
+            'filterFreq': 2000,
+            'filterQ': 1,
+            'pitchShift': 0
+        }
+    }, ensure_ascii=False)
+
+def _tool_set_swing(args):
+    amount = args.get('amount', 0)
+    try:
+        amount = float(amount)
+    except (ValueError, TypeError):
+        return '错误: amount 必须是数字'
+    amount = max(0, min(1, amount))
+    return f'已设置全局摇摆量：{amount:.2f}。Swing值{amount:.2f}表示{"无摇摆（标准节拍）" if amount == 0 else "轻微摇摆" if amount < 0.3 else "中等摇摆" if amount < 0.6 else "强烈摇摆（接近三连音）"}。'
+
+def _tool_quantize(args):
+    track_id = args.get('track_id', '')
+    grid = args.get('grid', '1/8')
+    if not track_id:
+        return '错误: 缺少 track_id 参数'
+    if grid not in ('1/4', '1/8', '1/16', '1/32'):
+        return '错误: grid 必须是 1/4、1/8、1/16 或 1/32'
+    grid_map = {'1/4': '四分音符', '1/8': '八分音符', '1/16': '十六分音符', '1/32': '三十二分音符'}
+    return f'已将轨道 {track_id} 的音符量化到{grid_map.get(grid, grid)}网格。音符时间已对齐。'
+
+def _tool_set_humanize(args):
+    amount = args.get('amount', 0)
+    try:
+        amount = float(amount)
+    except (ValueError, TypeError):
+        return '错误: amount 必须是数字'
+    amount = max(0, min(0.1, amount))
+    return f'已设置人性化量：{amount:.3f}秒。{"关闭人性化" if amount == 0 else "轻微人性化" if amount < 0.02 else "中等人性化" if amount < 0.05 else "强烈人性化"}。'
+
 def _tool_delegate_task(args):
     """Launch a sub-agent for a subtask. Supports read and write modes."""
     task = args.get('task', '').strip()
@@ -4177,6 +4415,16 @@ _TOOL_HANDLERS = {
     'set_bpm': _tool_set_bpm,
     'set_time_signature': _tool_set_time_signature,
     'get_project_info': _tool_get_project_info,
+    # Lyrics & Vocal tools
+    'edit_lyrics': _tool_edit_lyrics,
+    'synthesize_vocals': _tool_synthesize_vocals,
+    # Timbre tools
+    'set_timbre': _tool_set_timbre,
+    'get_timbre': _tool_get_timbre,
+    # Beat Control tools
+    'set_swing': _tool_set_swing,
+    'quantize': _tool_quantize,
+    'set_humanize': _tool_set_humanize,
 }
 
 def execute_agent_tool(name, arguments):

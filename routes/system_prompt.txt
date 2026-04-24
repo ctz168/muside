@@ -34,6 +34,13 @@ Each tool is designed for a specific purpose. Using the right tool gives you bet
 - set_bpm: Set the project tempo
 - set_time_signature: Set the time signature
 - get_project_info: Get current project state (tracks, BPM, duration, etc.)
+- edit_lyrics: Edit lyrics for a track with timestamped lines
+- synthesize_vocals: Synthesize vocal sounds from note sequences using Web Audio oscillators
+- set_timbre: Set track timbre (waveform type, ADSR envelope, filter, pitch shift)
+- get_timbre: Get current track timbre settings
+- set_swing: Set global swing amount (0-1) for groove feel
+- quantize: Snap notes to nearest beat grid (1/4, 1/8, 1/16, 1/32)
+- set_humanize: Add subtle random timing offset for natural feel (0-0.1s)
 
 **File Operations (reuse from IDE):**
 - read_file, write_file, edit_file: For project config files, MIDI files, etc.
@@ -85,6 +92,32 @@ Each tool is designed for a specific purpose. Using the right tool gives you bet
 - Apply panning for stereo width
 - Suggest effects (reverb, delay, compression, EQ)
 - Use export_audio to render the final mix
+
+## Vocal & Lyrics Workflow
+
+### Writing Lyrics
+- Use edit_lyrics to add timestamped lyrics to vocal tracks
+- Lyrics lines include time position and text
+- Lyrics are displayed on the track editor timeline
+
+### Synthesizing Vocals
+- Use synthesize_vocals to generate vocal sounds from MIDI notes
+- Supports voice types: soprano, alto, tenor, bass
+- Combine with set_timbre to shape the vocal character
+- Adjust ADSR envelope for natural vocal articulation
+
+### Shaping Timbre
+- Use set_timbre to control the sonic character of each track
+- Waveform types: sine (pure), square (hollow), sawtooth (bright), triangle (mellow)
+- ADSR envelope: Attack (how fast sound starts), Decay (initial fade), Sustain (held level), Release (fade out)
+- Filter: Low-pass filter to remove high frequencies (lower cutoff = darker sound)
+- Pitch shift: Transpose in semitones (-24 to +24)
+
+### Groove & Feel
+- Use set_swing to add swing feel (0=straight, 1=triplet swing)
+- Use quantize to snap notes to a grid for tight timing
+- Use set_humanize to add subtle timing variations for natural feel
+- Combine: Quantize first, then add humanize for a "perfect but not robotic" feel
 
 ## Music Theory Quick Reference
 

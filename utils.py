@@ -22,7 +22,7 @@ from flask import jsonify
 # ==================== Constants ====================
 SERVER_DIR = os.path.dirname(os.path.abspath(__file__))
 WORKSPACE = os.environ.get('MUSIDE_WORKSPACE', os.path.expanduser('~/muside_workspace'))
-PORT = int(os.environ.get('MUSIDE_PORT', 12345))
+PORT = int(os.environ.get('MUSIDE_PORT', 12346))
 HOST = os.environ.get('MUSIDE_HOST', '0.0.0.0')
 
 CONFIG_DIR = os.path.expanduser('~/.muside')

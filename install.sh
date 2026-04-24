@@ -393,7 +393,7 @@ import os, sys
 sys.path.insert(0, '.')
 from utils import PORT
 print(PORT)
-" 2>/dev/null) || IDE_PORT=${MUSIDE_PORT:-12345}
+" 2>/dev/null) || IDE_PORT=${MUSIDE_PORT:-12346}
 
 info "Detected server port: $IDE_PORT"
 

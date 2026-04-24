@@ -2,7 +2,7 @@
 # MusIDE - Start Script
 # Usage: bash start.sh [port]
 
-PORT=${1:-1239}
+PORT=${1:-12346}
 HOST="0.0.0.0"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

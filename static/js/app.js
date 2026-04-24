@@ -1251,41 +1251,157 @@ const AppManager = (() => {
         }
     }
 
-    // ── Venv Buttons ──
-    function initVenv() {
-        const venvBtn = document.getElementById('venv-btn');
-        const createVenvBtn = document.getElementById('create-venv-btn');
-        const installPkgBtn = document.getElementById('install-pkg-btn');
+    // ── Audio File Loading ──
+    function initAudioLoad() {
+        const audioFileInput = document.getElementById('audio-file-input');
+        const audioLoadBtn = document.getElementById('audio-load-btn');
+        const audioDropZone = document.getElementById('audio-load-drop-zone');
 
-        if (venvBtn) {
-            venvBtn.addEventListener('click', () => {
-                if (window.TerminalManager && TerminalManager.loadVenvInfo) {
-                    TerminalManager.loadVenvInfo().then(() => {
-                        showToast('虚拟环境信息已刷新', 'info', 1500);
+        if (audioLoadBtn) {
+            audioLoadBtn.addEventListener('click', function() {
+                if (audioFileInput) audioFileInput.click();
+            });
+        }
+
+        if (audioDropZone) {
+            audioDropZone.addEventListener('click', function() {
+                if (audioFileInput) audioFileInput.click();
+            });
+            audioDropZone.addEventListener('dragover', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                audioDropZone.style.borderColor = 'var(--accent)';
+            });
+            audioDropZone.addEventListener('dragleave', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                audioDropZone.style.borderColor = 'var(--border)';
+            });
+            audioDropZone.addEventListener('drop', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                audioDropZone.style.borderColor = 'var(--border)';
+                const files = e.dataTransfer.files;
+                if (files.length > 0 && window.TrackEditor) {
+                    const tracks = window.TrackEditor.getTracks();
+                    const trackId = tracks.length > 0 ? tracks[0].id : null;
+                    if (trackId) {
+                        Array.from(files).forEach(function(file, idx) {
+                            const targetTrack = idx < tracks.length ? tracks[idx].id : trackId;
+                            window.TrackEditor.loadAudioFile(targetTrack, file, 0).then(function(clip) {
+                                console.log('Loaded audio:', file.name, '→ track', targetTrack);
+                            }).catch(function(err) {
+                                console.error('Failed to load audio:', err);
+                            });
+                        });
+                    } else {
+                        alert('请先添加音轨');
+                    }
+                }
+            });
+        }
+
+        if (audioFileInput) {
+            audioFileInput.addEventListener('change', function() {
+                const files = this.files;
+                if (files.length > 0 && window.TrackEditor) {
+                    const tracks = window.TrackEditor.getTracks();
+                    if (tracks.length === 0) {
+                        alert('请先添加音轨');
+                        return;
+                    }
+                    Array.from(files).forEach(function(file, idx) {
+                        const targetTrack = idx < tracks.length ? tracks[idx].id : tracks[0].id;
+                        window.TrackEditor.loadAudioFile(targetTrack, file, 0).then(function(clip) {
+                            console.log('Loaded audio:', file.name, '→ track', targetTrack);
+                            // Update recent list
+                            const recentList = document.getElementById('audio-recent-list');
+                            if (recentList) {
+                                const item = document.createElement('div');
+                                item.textContent = '✓ ' + file.name;
+                                item.style.cssText = 'padding:2px 0;color:var(--green);';
+                                recentList.prepend(item);
+                                // Keep max 10 items
+                                while (recentList.children.length > 10) {
+                                    recentList.removeChild(recentList.lastChild);
+                                }
+                            }
+                        }).catch(function(err) {
+                            console.error('Failed to load audio:', err);
+                            alert('加载失败: ' + file.name + ' - ' + err.message);
+                        });
                     });
                 }
+                this.value = '';  // Reset so same file can be loaded again
             });
         }
-        if (createVenvBtn) {
-            createVenvBtn.addEventListener('click', () => {
-                if (window.TerminalManager && TerminalManager.createVenv) {
-                    TerminalManager.createVenv();
+
+        // ── Microphone Recording ──
+        const micBtn = document.getElementById('audio-load-mic-btn');
+        let mediaRecorder = null;
+        let recordedChunks = [];
+        let isRecordingMic = false;
+
+        if (micBtn) {
+            micBtn.addEventListener('click', async function() {
+                if (isRecordingMic && mediaRecorder && mediaRecorder.state === 'recording') {
+                    // Stop recording
+                    mediaRecorder.stop();
+                    isRecordingMic = false;
+                    micBtn.textContent = '⏺ 录音';
+                    micBtn.style.background = 'var(--bg-surface)';
+                    micBtn.style.color = 'var(--text-primary)';
+                    return;
                 }
-            });
-        }
-        if (installPkgBtn) {
-            installPkgBtn.addEventListener('click', () => {
-                if (window.TerminalManager && TerminalManager.installPackage) {
-                    TerminalManager.installPackage();
-                }
-            });
-        }
-        // Import requirements button
-        const importReqBtn = document.getElementById('import-req-btn');
-        if (importReqBtn) {
-            importReqBtn.addEventListener('click', () => {
-                if (window.TerminalManager && TerminalManager.importRequirements) {
-                    TerminalManager.importRequirements();
+
+                // Start recording
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    recordedChunks = [];
+                    mediaRecorder = new MediaRecorder(stream);
+                    
+                    mediaRecorder.ondataavailable = function(e) {
+                        if (e.data.size > 0) recordedChunks.push(e.data);
+                    };
+
+                    mediaRecorder.onstop = function() {
+                        // Stop all tracks to release microphone
+                        stream.getTracks().forEach(t => t.stop());
+                        
+                        if (recordedChunks.length === 0) return;
+                        const blob = new Blob(recordedChunks, { type: 'audio/webm' });
+                        const file = new File([blob], '录音_' + new Date().toLocaleTimeString('zh-CN').replace(/:/g, '') + '.webm', { type: 'audio/webm' });
+                        
+                        if (window.TrackEditor) {
+                            const tracks = window.TrackEditor.getTracks();
+                            if (tracks.length > 0) {
+                                window.TrackEditor.loadAudioFile(tracks[0].id, file, 0).then(function() {
+                                    showToast('录音已加载到轨道: ' + tracks[0].name, 'success');
+                                    const recentList = document.getElementById('audio-recent-list');
+                                    if (recentList) {
+                                        const item = document.createElement('div');
+                                        item.textContent = '🎤 ' + file.name;
+                                        item.style.cssText = 'padding:2px 0;color:var(--green);';
+                                        recentList.prepend(item);
+                                    }
+                                }).catch(function(err) {
+                                    showToast('录音加载失败: ' + err.message, 'error');
+                                });
+                            } else {
+                                showToast('请先添加音轨', 'warning');
+                            }
+                        }
+                        recordedChunks = [];
+                    };
+
+                    mediaRecorder.start();
+                    isRecordingMic = true;
+                    micBtn.textContent = '⏹ 停止';
+                    micBtn.style.background = '#f44336';
+                    micBtn.style.color = '#fff';
+                    showToast('开始录音... 点击停止按钮结束', 'info');
+                } catch (err) {
+                    showToast('无法访问麦克风: ' + err.message, 'error');
                 }
             });
         }
@@ -2068,7 +2184,7 @@ const AppManager = (() => {
         initEditorToolbar();
         initToolbar();
         initFileToolbar();
-        initVenv();
+        initAudioLoad();
         initAutoSave();
         initResize();
         initMobileFixes();
@@ -2118,20 +2234,16 @@ const AppManager = (() => {
             // Load chat history
             if (window.ChatManager) await ChatManager.loadHistory();
 
-            // Wire up chat settings button - use ChatManager's full settings dialog (with Test button)
-            const chatSettingsBtn = document.getElementById('chat-settings-btn');
-            if (chatSettingsBtn && window.ChatManager && ChatManager.showSettingsDialog) {
+            // Wire up toolbar settings button - use ChatManager's full settings dialog
+            const toolbarSettingsBtn = document.getElementById('btn-settings');
+            if (toolbarSettingsBtn && window.ChatManager && ChatManager.showSettingsDialog) {
                 const openSettings = () => {
                     ChatManager.showSettingsDialog().catch(err => {
                         console.error('[MusIDE] Settings dialog error:', err);
                         showToast('设置对话框打开失败: ' + err.message, 'error');
                     });
                 };
-                if (typeof bindTouchButton === 'function') {
-                    bindTouchButton(chatSettingsBtn, openSettings);
-                } else {
-                    chatSettingsBtn.addEventListener('click', openSettings);
-                }
+                bindTouchButton(toolbarSettingsBtn, openSettings);
             }
 
             showToast('MusIDE 就绪', 'success', 1500);

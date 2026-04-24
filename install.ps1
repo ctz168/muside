@@ -261,9 +261,9 @@ Write-Host "[5/5] Launching MusIDE IDE..." -ForegroundColor Blue
 Push-Location $InstallDir
 try {
     $DetectedPort = & $Python -c "import sys; sys.path.insert(0,'.'); from utils import PORT; print(PORT)" 2>$null
-    if ($LASTEXITCODE -ne 0) { $DetectedPort = 12345 }
+    if ($LASTEXITCODE -ne 0) { $DetectedPort = 12346 }
 } catch {
-    $DetectedPort = 12345
+    $DetectedPort = 12346
 } finally {
     Pop-Location
 }

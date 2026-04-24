@@ -17,7 +17,7 @@ from utils import (
 bp = Blueprint('run', __name__)
 
 # IDE's own port — never kill this
-_IDE_PORT = int(os.environ.get('MUSIDE_PORT', 12345))
+_IDE_PORT = int(os.environ.get('MUSIDE_PORT', 12346))
 
 
 def _extract_ports_from_code(code_text):
@@ -222,7 +222,7 @@ def kill_port():
         return jsonify({'error': 'Invalid port number'}), 400
 
     # SAFETY: Never kill the IDE's own port
-    ide_port = int(os.environ.get('MUSIDE_PORT', 12345))
+    ide_port = int(os.environ.get('MUSIDE_PORT', 12346))
     if port == ide_port:
         return jsonify({'error': f'BLOCKED: Port {port} is the MusIDE server port — killing it would shut down the IDE. Operation refused.'}), 403
 

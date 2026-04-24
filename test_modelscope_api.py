@@ -13,7 +13,7 @@ API_KEY = "ms-3eca52df-ea14-481b-9e72-73b988b612f7"
 MODEL = "stepfun-ai/Step-3.5-Flash"
 
 # Replicate the system prompt construction from chat.py
-_IDE_PORT = os.environ.get('MUSIDE_PORT', '12345')
+_IDE_PORT = os.environ.get('MUSIDE_PORT', '12346')
 
 DEFAULT_SYSTEM_PROMPT = f"""You are MusIDE AI Agent, a powerful coding assistant integrated in a mobile IDE.
 You have access to specialized tools for reading, writing, editing, searching, and managing code projects.

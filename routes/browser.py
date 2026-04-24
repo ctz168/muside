@@ -757,7 +757,7 @@ def _rewrite_css_urls(css, proxy_base):
 def _extract_base_from_proxy_base(proxy_base):
     """Extract the original target directory URL from a proxy_base string.
 
-    proxy_base format: http://localhost:12345/api/browser/proxy?url=<target>&base=<dir>
+    proxy_base format: http://localhost:12346/api/browser/proxy?url=<target>&base=<dir>
     Returns the <dir> part (the original directory URL on the target server).
     """
     parsed = urllib.parse.urlparse(proxy_base)
@@ -876,7 +876,7 @@ def _proxy_url(url, proxy_base):
     """Convert an absolute or relative URL to an absolute proxy URL.
 
     proxy_base has the form:
-      http://localhost:12345/api/browser/proxy?url=<encoded_target>&base=<encoded_dir>
+      http://localhost:12346/api/browser/proxy?url=<encoded_target>&base=<encoded_dir>
     Always returns absolute URLs to avoid interference from <base> tag injection.
     """
     if not url:

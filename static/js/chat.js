@@ -1,6 +1,6 @@
 /**
  * ChatManager - LLM chat interface with SSE streaming and agent tool execution for MusIDE
- * Works with Flask backend on port 1239
+ * Works with Flask backend on port 12346
  */
 const ChatManager = (() => {
     'use strict';
@@ -64,7 +64,13 @@ const ChatManager = (() => {
         'list_tracks', 'add_track', 'remove_track',
         'set_track_volume', 'set_track_pan', 'set_track_mute', 'set_track_solo',
         'set_bpm', 'set_time_signature', 'get_project_info',
-    ];
+        // Lyrics & Vocal tools
+        'edit_lyrics', 'synthesize_vocals',
+        // Timbre tools
+        'set_timbre', 'get_timbre',
+        // Beat Control tools
+        'set_swing', 'quantize', 'set_humanize',
+    };
 
     const TOOL_ICONS = {
         read_file:     '📖',
@@ -130,6 +136,16 @@ const ChatManager = (() => {
         set_bpm:             '🥁',
         set_time_signature:  '🎼',
         get_project_info:    'ℹ️',
+        // Lyrics & Vocal tools
+        edit_lyrics:         '📝',
+        synthesize_vocals:   '🎤',
+        // Timbre tools
+        set_timbre:          '🎛',
+        get_timbre:          '🔊',
+        // Beat Control tools
+        set_swing:           '💃',
+        quantize:            '📏',
+        set_humanize:        '🤲',
     };
 
     const COLLAPSE_THRESHOLD = 500; // chars before showing "Show more"
@@ -4018,6 +4034,25 @@ Do NOT execute any tools. Only generate the plan.\n\nUser request: `;
                 e.preventDefault();
                 toggleSearchBar();
             });
+        }
+
+        // Settings button (LLM settings dialog)
+        const settingsBtn = document.getElementById('chat-settings-btn');
+        if (settingsBtn) {
+            settingsBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                showSettingsDialog().catch(err => {
+                    console.error('ChatManager: settings dialog error:', err);
+                });
+            });
+            // Also handle touchend for mobile
+            settingsBtn.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                showSettingsDialog().catch(err => {
+                    console.error('ChatManager: settings dialog touch error:', err);
+                });
+            }, { passive: false });
         }
 
         function toggleSearchBar() {

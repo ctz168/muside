@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 MusIDE - Mobile-Optimized Web IDE for Termux/Ubuntu
-Lightweight Python server (default port: 12345, configurable via MUSIDE_PORT env)
+Lightweight Python server (default port: 12346, configurable via MUSIDE_PORT env)
 
 Refactored: routes split into routes/ directory, shared utilities in utils.py.
 """

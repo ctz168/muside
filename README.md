@@ -26,7 +26,7 @@ curl -fsSL https://raw.githubusercontent.com/ctz168/muside/main/install.sh | bas
 
 > 支持平台：Windows 10/11、Termux、Ubuntu/Debian、Fedora、CentOS、macOS、Alpine、Arch、openSUSE
 >
-> 默认地址：`http://localhost:12345`
+> 默认地址：`http://localhost:12346`
 
 **自定义安装目录：**
 ```bash
@@ -54,7 +54,7 @@ pip install flask flask-cors
 git clone https://github.com/ctz168/muside.git
 cd muside
 python muside_server.py
-# 浏览器打开 http://localhost:12345
+# 浏览器打开 http://localhost:12346
 ```
 
 **Termux：**
@@ -100,11 +100,11 @@ python3 muside_server.py
 ### Docker
 
 ```bash
-docker run -d -p 12345:12345 -v ~/muside_workspace:/workspace python:3.12-slim bash -c \
+docker run -d -p 12346:12346 -v ~/muside_workspace:/workspace python:3.12-slim bash -c \
   "pip install flask flask-cors && git clone --depth 1 https://github.com/ctz168/muside.git /muside && cd /muside && MUSIDE_WORKSPACE=/workspace python3 muside_server.py"
 ```
 
-启动后浏览器打开 `http://localhost:12345` 即可使用。
+启动后浏览器打开 `http://localhost:12346` 即可使用。
 
 ## 功能特性
 
@@ -205,7 +205,7 @@ ctz168/muside/
 
 ## API 接口
 
-服务端运行在 `http://localhost:12345`，所有 API 均返回 JSON。
+服务端运行在 `http://localhost:12346`，所有 API 均返回 JSON。
 
 ### 文件管理
 
@@ -410,7 +410,7 @@ LLM API 配置存储在 `~/.muside/llm_config.json`：
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `MUSIDE_PORT` | `12345` | 服务监听端口 |
+| `MUSIDE_PORT` | `12346` | 服务监听端口 |
 | `MUSIDE_HOST` | `0.0.0.0` | 绑定地址 |
 | `MUSIDE_WORKSPACE` | `~/muside_workspace` | 默认工作空间路径 |
 

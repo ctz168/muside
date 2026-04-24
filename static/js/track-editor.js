@@ -32,6 +32,7 @@ window.TrackEditor = (function () {
 
     // ───────────────────── 工具函数 ─────────────────────
     function clamp(val, min, max) { return Math.max(min, Math.min(max, val)); }
+    function isMobileView() { return window.innerWidth <= 768; }
     function uid() { return '_' + Math.random().toString(36).substr(2, 9); }
     function formatTime(sec) {
         if (!isFinite(sec) || sec < 0) sec = 0;
@@ -100,6 +101,18 @@ window.TrackEditor = (function () {
     // VU表
     let _vuMeters = {};  // trackId -> { analyser, peak, rms }
 
+    // 歌词面板
+    let _lyricsVisible = false;
+    let _lyrics = {};  // trackId -> [ { time: 0, text: '歌词行' }, ... ]
+
+    // 音色参数 (每轨道)
+    let _defaultTimbre = { waveform: 'sine', attack: 0.05, decay: 0.1, sustain: 0.7, release: 0.3, filterFreq: 2000, filterQ: 1, pitchShift: 0, swing: 0, humanize: 0 };
+
+    // 全局节拍/律动设置
+    let _swing = 0;        // 0-1 摇摆量
+    let _humanize = 0;     // 0-0.1 人性化偏移
+    let _quantizeValue = 0; // 0=off, 1=1/4, 2=1/8, 3=1/16
+
     // DOM元素缓存
     let _els = {};
 
@@ -160,6 +173,7 @@ window.TrackEditor = (function () {
             analyser: analyser,
             clips: [],
             audioBuffers: {},  // clipId -> AudioBuffer
+            timbre: Object.assign({}, _defaultTimbre),  // 每轨道音色参数
         };
         _tracks.push(track);
         _vuMeters[id] = { analyser: analyser, peak: 0, rms: 0 };
@@ -547,6 +561,7 @@ window.TrackEditor = (function () {
         updateTimeDisplay();
         if (_mixerVisible) renderMixerPanel();
         if (_pianoRollVisible) renderPianoRoll();
+        if (_lyricsVisible) renderLyricsPanel();
     }
 
     // ───────────────────── DOM构建 ─────────────────────
@@ -599,6 +614,11 @@ window.TrackEditor = (function () {
         pianoRollPanel.className = 'te-piano-roll-panel te-hidden';
         _container.appendChild(pianoRollPanel);
 
+        // 歌词面板 (可切换)
+        const lyricsPanel = document.createElement('div');
+        lyricsPanel.className = 'te-lyrics-panel te-hidden';
+        _container.appendChild(lyricsPanel);
+
         // 缓存元素
         _els = {
             transport,
@@ -611,6 +631,7 @@ window.TrackEditor = (function () {
             lanesCanvas,
             mixerPanel,
             pianoRollPanel,
+            lyricsPanel,
         };
 
         // 绑定传输控制事件
@@ -639,6 +660,7 @@ window.TrackEditor = (function () {
             '<button class="te-btn te-btn-add-track" title="添加轨道">+</button>' +
             '<button class="te-btn te-btn-mixer" title="混音器">🎛</button>' +
             '<button class="te-btn te-btn-piano" title="钢琴卷帘">🎹</button>' +
+            '<button class="te-btn te-btn-lyrics" title="歌词">📝</button>' +
             '<span class="te-bpm-display"><label>BPM</label><input type="number" class="te-bpm-input" value="' + _bpm + '" min="20" max="300"></span>' +
             '<span class="te-timesig-display"><input type="number" class="te-timesig-num" value="' + _timeSigNum + '" min="1" max="16">/<input type="number" class="te-timesig-den" value="' + _timeSigDen + '" min="1" max="16"></span>' +
             '</div>';
@@ -706,6 +728,12 @@ window.TrackEditor = (function () {
                 renderPianoRoll();
             }
         });
+        const lyricsBtn = t.querySelector('.te-btn-lyrics');
+        lyricsBtn.addEventListener('click', function () {
+            _lyricsVisible = !_lyricsVisible;
+            _els.lyricsPanel.classList.toggle('te-hidden', !_lyricsVisible);
+            if (_lyricsVisible) renderLyricsPanel();
+        });
         bpmInput.addEventListener('change', function () {
             setBPM(parseInt(this.value) || DEFAULT_BPM);
             bpmInput.value = _bpm;
@@ -767,6 +795,34 @@ window.TrackEditor = (function () {
 
         // 滚动
         lanesContainer.addEventListener('wheel', onLanesWheel, { passive: false });
+
+        // Mobile pinch-to-zoom
+        var pinchStartDist = 0;
+        var pinchStartZoom = 1;
+        lanesContainer.addEventListener('touchstart', function(e) {
+            if (e.touches.length === 2) {
+                e.preventDefault();
+                var dx = e.touches[0].clientX - e.touches[1].clientX;
+                var dy = e.touches[0].clientY - e.touches[1].clientY;
+                pinchStartDist = Math.sqrt(dx * dx + dy * dy);
+                pinchStartZoom = _zoom;
+            }
+        }, { passive: false });
+        lanesContainer.addEventListener('touchmove', function(e) {
+            if (e.touches.length === 2) {
+                e.preventDefault();
+                var dx = e.touches[0].clientX - e.touches[1].clientX;
+                var dy = e.touches[0].clientY - e.touches[1].clientY;
+                var dist = Math.sqrt(dx * dx + dy * dy);
+                if (pinchStartDist > 0) {
+                    _zoom = clamp(pinchStartZoom * (dist / pinchStartDist), 0.1, 10);
+                    renderAll();
+                }
+            }
+        }, { passive: false });
+        lanesContainer.addEventListener('touchend', function() {
+            pinchStartDist = 0;
+        });
     }
 
     // 时间线鼠标点击 → 定位播放头
@@ -800,6 +856,61 @@ window.TrackEditor = (function () {
     }
 
     function handleLanesPointerDown(x, y) {
+        if (isMobileView()) {
+            // Mobile segment mode: calculate which segment and track was clicked
+            const pixPerBeat = pixelsPerBeat();
+            const containerW = _els.lanesContainer.clientWidth;
+            const segmentBeats = containerW / pixPerBeat;
+            const segmentDuration = (segmentBeats * 60) / _bpm;
+            if (segmentDuration <= 0) return;
+            const totalDuration = getDuration();
+            const numSegments = Math.max(1, Math.ceil(totalDuration / segmentDuration));
+            const segmentLabelHeight = 22;
+            const segmentHeight = _tracks.length * TRACK_LANE_HEIGHT + segmentLabelHeight;
+            const segIdx = Math.floor(y / segmentHeight);
+            if (segIdx < 0 || segIdx >= numSegments) return;
+            const segStart = segIdx * segmentDuration;
+            const localY = y - segIdx * segmentHeight - segmentLabelHeight;
+            const trackIdx = Math.floor(localY / TRACK_LANE_HEIGHT);
+            if (trackIdx < 0 || trackIdx >= _tracks.length) {
+                _selectedClipTrackId = null;
+                _selectedClipId = null;
+                renderTrackLanes();
+                return;
+            }
+            const track = _tracks[trackIdx];
+            const clickTime = segStart + (x / containerW) * segmentDuration;
+            // Find clicked clip
+            let clickedClip = null;
+            for (let i = track.clips.length - 1; i >= 0; i--) {
+                const clip = track.clips[i];
+                if (clickTime >= clip.startTime && clickTime <= clip.startTime + clip.duration) {
+                    clickedClip = clip;
+                    break;
+                }
+            }
+            if (clickedClip) {
+                _selectedClipTrackId = track.id;
+                _selectedClipId = clickedClip.id;
+                // Set up drag state for mobile
+                _dragState = {
+                    type: 'clip-move',
+                    trackId: track.id,
+                    clipId: clickedClip.id,
+                    origStart: clickedClip.startTime,
+                    startX: x,
+                    moved: false,
+                    mobileSegIdx: segIdx,
+                    mobileSegDuration: segmentDuration,
+                };
+            } else {
+                _selectedClipTrackId = null;
+                _selectedClipId = null;
+            }
+            renderTrackLanes();
+            return;
+        }
+        // Desktop mode: original logic
         // 确定点击了哪个轨道
         const trackIdx = Math.floor(y / TRACK_LANE_HEIGHT);
         if (trackIdx < 0 || trackIdx >= _tracks.length) {
@@ -997,51 +1108,219 @@ window.TrackEditor = (function () {
         if (!canvas || !container) return;
 
         const w = container.clientWidth;
-        const h = _tracks.length * TRACK_LANE_HEIGHT;
-        canvas.width = w * (window.devicePixelRatio || 1);
-        canvas.height = h * (window.devicePixelRatio || 1);
-        canvas.style.width = w + 'px';
-        canvas.style.height = h + 'px';
-        container.scrollTop = _scrollY;
-
-        const ctx = canvas.getContext('2d');
         const dpr = window.devicePixelRatio || 1;
-        ctx.scale(dpr, dpr);
+        const mobile = isMobileView();
 
-        const cs = getComputedStyle(_container);
+        if (mobile) {
+            // Mobile segment mode: break timeline into screen-width segments, stack vertically
+            const pixPerBeat = pixelsPerBeat();
+            const segmentBeats = w / pixPerBeat; // beats that fit in one segment
+            const segmentDuration = (segmentBeats * 60) / _bpm; // seconds per segment
+            if (segmentDuration <= 0) return;
+            const totalDuration = getDuration();
+            const numSegments = Math.max(1, Math.ceil(totalDuration / segmentDuration));
+            const numTracks = _tracks.length;
+            const segmentHeight = numTracks * TRACK_LANE_HEIGHT;
+            const segmentLabelHeight = 22;
+            const totalH = numSegments * (segmentHeight + segmentLabelHeight);
+            canvas.width = w * dpr;
+            canvas.height = totalH * dpr;
+            canvas.style.width = w + 'px';
+            canvas.style.height = totalH + 'px';
+            const ctx = canvas.getContext('2d');
+            ctx.scale(dpr, dpr);
+            const cs = getComputedStyle(_container);
 
-        // 逐轨道渲染
-        _tracks.forEach(function (track, trackIdx) {
-            const y = trackIdx * TRACK_LANE_HEIGHT;
+            // Clear
+            ctx.fillStyle = cs.getPropertyValue('--bg-secondary') || '#1a1510';
+            ctx.fillRect(0, 0, w, totalH);
 
-            // 轨道背景
-            ctx.fillStyle = trackIdx % 2 === 0
-                ? (cs.getPropertyValue('--bg-primary') || '#1a1510')
-                : (cs.getPropertyValue('--bg-tertiary') || '#16120d');
-            ctx.fillRect(0, y, w, TRACK_LANE_HEIGHT);
+            for (let seg = 0; seg < numSegments; seg++) {
+                const segStart = seg * segmentDuration;
+                const segEnd = Math.min(segStart + segmentDuration, totalDuration);
+                const yOffset = seg * (segmentHeight + segmentLabelHeight);
 
-            // 轨道分隔线
-            ctx.strokeStyle = cs.getPropertyValue('--border') || '#3a3228';
-            ctx.lineWidth = 0.5;
-            ctx.beginPath();
-            ctx.moveTo(0, y + TRACK_LANE_HEIGHT);
-            ctx.lineTo(w, y + TRACK_LANE_HEIGHT);
-            ctx.stroke();
+                // Segment time label
+                ctx.fillStyle = 'rgba(232,133,61,0.15)';
+                ctx.fillRect(0, yOffset, w, segmentLabelHeight);
+                ctx.fillStyle = cs.getPropertyValue('--text-muted') || '#888';
+                ctx.font = '10px ' + (cs.getPropertyValue('--font-mono') || 'monospace');
+                const startStr = formatTime(segStart);
+                const endStr = formatTime(segEnd);
+                ctx.fillText(startStr + ' - ' + endStr, 4, yOffset + 14);
 
-            // 静音轨道半透明遮罩
-            if (track.mute || (!isTrackAudible(track))) {
-                ctx.fillStyle = 'rgba(0,0,0,0.4)';
-                ctx.fillRect(0, y, w, TRACK_LANE_HEIGHT);
+                // Draw tracks in this segment
+                _tracks.forEach(function(track, i) {
+                    const trackY = yOffset + segmentLabelHeight + i * TRACK_LANE_HEIGHT;
+                    // Track background
+                    ctx.fillStyle = i % 2 === 0
+                        ? (cs.getPropertyValue('--bg-primary') || '#1a1510')
+                        : (cs.getPropertyValue('--bg-tertiary') || '#16120d');
+                    ctx.fillRect(0, trackY, w, TRACK_LANE_HEIGHT);
+                    // Track name overlay with color accent
+                    ctx.fillStyle = hexToRgba(track.color, 0.85);
+                    ctx.fillRect(0, trackY, 6, TRACK_LANE_HEIGHT);
+                    ctx.fillStyle = cs.getPropertyValue('--text-primary') || '#f5f0eb';
+                    ctx.font = 'bold 11px ' + (cs.getPropertyValue('--font-sans') || 'sans-serif');
+                    ctx.fillText(track.name, 10, trackY + 14);
+                    // Volume indicator
+                    ctx.font = '9px ' + (cs.getPropertyValue('--font-mono') || 'monospace');
+                    ctx.fillStyle = cs.getPropertyValue('--text-muted') || '#7d7068';
+                    ctx.fillText('Vol:' + Math.round(track.volume * 100) + '%', 10, trackY + 28);
+                    if (track.mute) { ctx.fillText('[M]', 60, trackY + 28); }
+                    if (track.solo) { ctx.fillText('[S]', 80, trackY + 28); }
+                    // Track border
+                    ctx.strokeStyle = cs.getPropertyValue('--border') || '#3a3228';
+                    ctx.lineWidth = 0.5;
+                    ctx.beginPath();
+                    ctx.moveTo(0, trackY + TRACK_LANE_HEIGHT);
+                    ctx.lineTo(w, trackY + TRACK_LANE_HEIGHT);
+                    ctx.stroke();
+                    // Mute overlay
+                    if (track.mute || (!isTrackAudible(track))) {
+                        ctx.fillStyle = 'rgba(0,0,0,0.4)';
+                        ctx.fillRect(0, trackY, w, TRACK_LANE_HEIGHT);
+                    }
+                    // Draw clips in this segment
+                    track.clips.forEach(function(clip) {
+                        // Calculate clip position within this segment
+                        const clipStartInSeg = clip.startTime - segStart;
+                        const clipEndInSeg = clip.startTime + clip.duration - segStart;
+                        if (clipEndInSeg <= 0 || clipStartInSeg >= segmentDuration) return;
+                        const visibleStart = Math.max(0, clipStartInSeg);
+                        const visibleEnd = Math.min(segmentDuration, clipEndInSeg);
+                        const clipX = (visibleStart / segmentDuration) * w;
+                        const clipW = ((visibleEnd - visibleStart) / segmentDuration) * w;
+                        const isSelected = (_selectedClipTrackId === track.id && _selectedClipId === clip.id);
+                        const clipY = trackY + 4;
+                        const clipH = TRACK_LANE_HEIGHT - 8;
+                        // Clip background
+                        ctx.fillStyle = hexToRgba(track.color, isSelected ? 0.6 : 0.35);
+                        ctx.fillRect(clipX, clipY, clipW, clipH);
+                        // Selected border
+                        if (isSelected) {
+                            ctx.strokeStyle = track.color;
+                            ctx.lineWidth = 2;
+                            ctx.strokeRect(clipX, clipY, clipW, clipH);
+                        }
+                        // Waveform rendering for mobile segment
+                        if (clip.waveformPeaks && clipW > 4) {
+                            renderWaveformSegment(ctx, clip.waveformPeaks, clipX, clipY, clipW, clipH, track.color, visibleStart, visibleEnd, clip.startTime, clip.duration);
+                        }
+                        // Clip name
+                        if (clipW > 30) {
+                            ctx.fillStyle = cs.getPropertyValue('--text-primary') || '#f5f0eb';
+                            ctx.font = '9px ' + (cs.getPropertyValue('--font-mono') || 'monospace');
+                            ctx.save();
+                            ctx.beginPath();
+                            ctx.rect(clipX + 3, clipY, clipW - 6, clipH);
+                            ctx.clip();
+                            ctx.fillText(clip.name, clipX + 4, clipY + 12);
+                            ctx.restore();
+                        }
+                        // Trim handles
+                        if (isSelected) {
+                            ctx.fillStyle = hexToRgba('#ffffff', 0.4);
+                            ctx.fillRect(clipX, clipY, CLIP_TRIM_EDGE, clipH);
+                            ctx.fillRect(clipX + clipW - CLIP_TRIM_EDGE, clipY, CLIP_TRIM_EDGE, clipH);
+                        }
+                    });
+                });
             }
+            // Playhead in mobile mode
+            const currentTime = getCurrentTime();
+            const currentSeg = Math.floor(currentTime / segmentDuration);
+            if (currentSeg >= 0 && currentSeg < numSegments) {
+                const segStart = currentSeg * segmentDuration;
+                const px = ((currentTime - segStart) / segmentDuration) * w;
+                const yOffset = currentSeg * (segmentHeight + segmentLabelHeight) + segmentLabelHeight;
+                ctx.strokeStyle = '#e85d5d';
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.moveTo(px, yOffset);
+                ctx.lineTo(px, yOffset + segmentHeight);
+                ctx.stroke();
+                ctx.fillStyle = '#e85d5d';
+                ctx.beginPath();
+                ctx.moveTo(px - 5, yOffset);
+                ctx.lineTo(px + 5, yOffset);
+                ctx.lineTo(px, yOffset + 6);
+                ctx.closePath();
+                ctx.fill();
+            }
+        } else {
+            // Desktop mode: original rendering
+            const h = _tracks.length * TRACK_LANE_HEIGHT;
+            canvas.width = w * dpr;
+            canvas.height = h * dpr;
+            canvas.style.width = w + 'px';
+            canvas.style.height = h + 'px';
+            container.scrollTop = _scrollY;
 
-            // 绘制剪辑
-            track.clips.forEach(function (clip) {
-                renderClip(ctx, track, clip, y, w, cs);
+            const ctx = canvas.getContext('2d');
+            ctx.scale(dpr, dpr);
+
+            const cs = getComputedStyle(_container);
+
+            // 逐轨道渲染
+            _tracks.forEach(function (track, trackIdx) {
+                const y = trackIdx * TRACK_LANE_HEIGHT;
+
+                // 轨道背景
+                ctx.fillStyle = trackIdx % 2 === 0
+                    ? (cs.getPropertyValue('--bg-primary') || '#1a1510')
+                    : (cs.getPropertyValue('--bg-tertiary') || '#16120d');
+                ctx.fillRect(0, y, w, TRACK_LANE_HEIGHT);
+
+                // 轨道分隔线
+                ctx.strokeStyle = cs.getPropertyValue('--border') || '#3a3228';
+                ctx.lineWidth = 0.5;
+                ctx.beginPath();
+                ctx.moveTo(0, y + TRACK_LANE_HEIGHT);
+                ctx.lineTo(w, y + TRACK_LANE_HEIGHT);
+                ctx.stroke();
+
+                // 静音轨道半透明遮罩
+                if (track.mute || (!isTrackAudible(track))) {
+                    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+                    ctx.fillRect(0, y, w, TRACK_LANE_HEIGHT);
+                }
+
+                // 绘制剪辑
+                track.clips.forEach(function (clip) {
+                    renderClip(ctx, track, clip, y, w, cs);
+                });
             });
-        });
 
-        // 播放头
-        renderPlayheadOnCanvas(ctx, w, h);
+            // 播放头
+            renderPlayheadOnCanvas(ctx, w, h);
+        }
+    }
+
+    // Waveform rendering helper for mobile segment mode (maps peaks to segment-local coordinates)
+    function renderWaveformSegment(ctx, peaks, x, y, w, h, color, visibleStart, visibleEnd, clipStartTime, clipDuration) {
+        const midY = y + h / 2;
+        const halfH = h / 2 - 2;
+        // Map visible portion of the clip to the segment-local pixel range
+        const clipLocalStart = visibleStart - clipStartTime;
+        const clipLocalEnd = visibleEnd - clipStartTime;
+        const startFrac = clipLocalStart / clipDuration;
+        const endFrac = clipLocalEnd / clipDuration;
+
+        ctx.fillStyle = hexToRgba(color, 0.7);
+
+        for (let i = 0; i < w; i++) {
+            const frac = startFrac + (i / w) * (endFrac - startFrac);
+            const idx = Math.floor(frac * peaks.length);
+            const valL = (idx >= 0 && idx < peaks.left.length) ? peaks.left[idx] : 0;
+            const valR = (idx >= 0 && idx < peaks.right.length) ? peaks.right[idx] : 0;
+            const topH = valL * halfH;
+            const botH = valR * halfH;
+            ctx.globalAlpha = 0.8;
+            ctx.fillRect(x + i, midY - topH, 1, topH);
+            ctx.fillRect(x + i, midY, 1, botH);
+        }
+        ctx.globalAlpha = 1;
     }
 
     function renderClip(ctx, track, clip, trackY, canvasWidth, cs) {
@@ -2055,6 +2334,31 @@ window.TrackEditor = (function () {
     display: block;
     cursor: crosshair;
 }
+/* ─── 移动端响应式 ─── */
+@media (max-width: 768px) {
+    .te-container { font-size: 11px; }
+    .te-transport { flex-wrap: wrap; gap: 4px; padding: 2px 4px; }
+    .te-transport-left { order: 1; }
+    .te-transport-center { order: 3; width: 100%; text-align: center; }
+    .te-transport-right { order: 2; flex-wrap: wrap; gap: 2px; }
+    .te-transport-right .te-btn { padding: 2px 4px; font-size: 10px; }
+    .te-bpm-display, .te-timesig-display { display: none; }
+    /* 移动端: 隐藏左侧轨道头列，改为在Canvas内渲染轨道名 */
+    .te-track-headers-col { display: none !important; }
+    /* 内容列占满宽度 */
+    .te-content-col { width: 100% !important; }
+    /* 时间线Canvas占满宽度 */
+    .te-timeline-canvas { width: 100% !important; }
+    /* 轨道区域占满宽度，垂直滚动查看分段 */
+    .te-lanes-container { width: 100% !important; overflow-x: hidden !important; overflow-y: auto !important; -webkit-overflow-scrolling: touch; }
+    .te-lanes-canvas { width: 100% !important; }
+    .te-lyrics-panel, .te-piano-roll-panel, .te-mixer-panel { max-height: 40vh; }
+    .te-main-area { min-height: 200px; }
+}
+@media (max-width: 480px) {
+    .te-transport-left .te-btn { padding: 2px 3px; font-size: 9px; }
+    .te-main-area { min-height: 160px; }
+}
 `;
     }
 
@@ -2135,6 +2439,196 @@ window.TrackEditor = (function () {
         renderAll();
     }
 
+    // ───────────────────── 歌词面板 ─────────────────────
+    function renderLyricsPanel() {
+        const panel = _els.lyricsPanel;
+        if (!panel) return;
+        const trackId = _tracks.length > 0 ? _tracks[0].id : null;
+        const lyrics = trackId ? (_lyrics[trackId] || []) : [];
+        let html = '<div style="padding:8px;font-size:12px;color:var(--text-primary);">';
+        html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">';
+        html += '<span style="font-weight:600;">📝 歌词编辑</span>';
+        if (_tracks.length > 0) {
+            html += '<select id="te-lyrics-track-select" style="flex:1;padding:2px 6px;border-radius:4px;background:var(--bg-tertiary);color:var(--text-primary);border:1px solid var(--border);font-size:11px;">';
+            _tracks.forEach(function(t) {
+                html += '<option value="' + t.id + '"' + (t.id === trackId ? ' selected' : '') + '>' + t.name + '</option>';
+            });
+            html += '</select>';
+        }
+        html += '</div>';
+        html += '<textarea id="te-lyrics-editor" style="width:100%;height:300px;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border);border-radius:4px;padding:8px;font-size:12px;font-family:var(--font-mono);resize:vertical;" placeholder="每行格式: [MM:SS] 歌词文本&#10;例: [00:05] 第一句歌词&#10;[00:10] 第二句歌词">';
+        lyrics.forEach(function(line) {
+            const m = Math.floor(line.time / 60);
+            const s = Math.floor(line.time % 60);
+            html += '[' + String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0') + '] ' + line.text + '\n';
+        });
+        html += '</textarea>';
+        html += '<div style="display:flex;gap:6px;margin-top:6px;">';
+        html += '<button id="te-lyrics-apply" style="flex:1;padding:4px;border:none;background:var(--accent);color:#fff;border-radius:4px;font-size:11px;cursor:pointer;">应用歌词</button>';
+        html += '<button id="te-lyrics-clear" style="padding:4px 8px;border:1px solid var(--border);background:var(--bg-surface);color:var(--text-secondary);border-radius:4px;font-size:11px;cursor:pointer;">清空</button>';
+        html += '</div></div>';
+        panel.innerHTML = html;
+        // Bind events
+        const applyBtn = document.getElementById('te-lyrics-apply');
+        const clearBtn = document.getElementById('te-lyrics-clear');
+        const trackSelect = document.getElementById('te-lyrics-track-select');
+        const editor = document.getElementById('te-lyrics-editor');
+        if (applyBtn) applyBtn.addEventListener('click', function() {
+            const tid = trackSelect ? trackSelect.value : trackId;
+            if (!tid) return;
+            const text = editor ? editor.value : '';
+            const lines = text.split('\n');
+            const parsed = [];
+            lines.forEach(function(line) {
+                const match = line.match(/\[(\d{2}):(\d{2})\]\s*(.+)/);
+                if (match) {
+                    parsed.push({ time: parseInt(match[1]) * 60 + parseInt(match[2]), text: match[3].trim() });
+                }
+            });
+            parsed.sort(function(a, b) { return a.time - b.time; });
+            _lyrics[tid] = parsed;
+        });
+        if (clearBtn) clearBtn.addEventListener('click', function() {
+            if (editor) editor.value = '';
+            const tid = trackSelect ? trackSelect.value : trackId;
+            if (tid) _lyrics[tid] = [];
+        });
+        if (trackSelect) trackSelect.addEventListener('change', function() {
+            const tid = this.value;
+            const l = _lyrics[tid] || [];
+            if (editor) {
+                editor.value = '';
+                l.forEach(function(line) {
+                    const m = Math.floor(line.time / 60);
+                    const s = Math.floor(line.time % 60);
+                    editor.value += '[' + String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0') + '] ' + line.text + '\n';
+                });
+            }
+        });
+    }
+
+    // ───────────────────── 歌声合成 ─────────────────────
+    function midiToFreq(midi) { return 440 * Math.pow(2, (midi - 69) / 12); }
+
+    function synthesizeVocals(trackId, notes) {
+        const track = getTrackById(trackId);
+        if (!track) return 0;
+        const ctx = getAudioContext();
+        const master = ensureMasterGain();
+        let count = 0;
+        notes.forEach(function(note) {
+            if (note.pitch == null || note.start_time == null || note.duration == null) return;
+            const freq = midiToFreq(note.pitch + (track.timbre.pitchShift || 0));
+            const swingOffset = _swing > 0 && secondsToBeats(note.start_time, _bpm) % 1 >= 0.5
+                ? _swing * (60 / _bpm / 2) : 0;
+            const humanOffset = _humanize > 0 ? (Math.random() - 0.5) * _humanize * 2 : 0;
+            const startTime = Math.max(0, note.start_time + swingOffset + humanOffset);
+            const timbre = track.timbre;
+            // Oscillator
+            const osc = ctx.createOscillator();
+            osc.type = timbre.waveform || 'sine';
+            osc.frequency.value = freq;
+            // ADSR envelope
+            const env = ctx.createGain();
+            const attack = timbre.attack || 0.05;
+            const decay = timbre.decay || 0.1;
+            const sustain = timbre.sustain || 0.7;
+            const release = timbre.release || 0.3;
+            const dur = note.duration;
+            env.gain.setValueAtTime(0, ctx.currentTime + startTime);
+            env.gain.linearRampToValueAtTime(0.5, ctx.currentTime + startTime + attack);
+            env.gain.linearRampToValueAtTime(0.5 * sustain, ctx.currentTime + startTime + attack + decay);
+            env.gain.setValueAtTime(0.5 * sustain, ctx.currentTime + startTime + dur - release);
+            env.gain.linearRampToValueAtTime(0, ctx.currentTime + startTime + dur);
+            // Filter
+            const filter = ctx.createBiquadFilter();
+            filter.type = 'lowpass';
+            filter.frequency.value = timbre.filterFreq || 2000;
+            filter.Q.value = timbre.filterQ || 1;
+            // Connect: osc → filter → env → track gain
+            osc.connect(filter);
+            filter.connect(env);
+            env.connect(track.gainNode);
+            osc.start(ctx.currentTime + startTime);
+            osc.stop(ctx.currentTime + startTime + dur + 0.01);
+            count++;
+        });
+        return count;
+    }
+
+    function playSynthNote(trackId, frequency, duration, startTime) {
+        const track = getTrackById(trackId);
+        if (!track) return;
+        const ctx = getAudioContext();
+        const timbre = track.timbre;
+        const osc = ctx.createOscillator();
+        osc.type = timbre.waveform || 'sine';
+        osc.frequency.value = frequency;
+        const env = ctx.createGain();
+        env.gain.setValueAtTime(0, ctx.currentTime + startTime);
+        env.gain.linearRampToValueAtTime(0.5, ctx.currentTime + startTime + (timbre.attack || 0.05));
+        env.gain.linearRampToValueAtTime(0.35, ctx.currentTime + startTime + (timbre.attack || 0.05) + (timbre.decay || 0.1));
+        env.gain.linearRampToValueAtTime(0, ctx.currentTime + startTime + duration);
+        const filter = ctx.createBiquadFilter();
+        filter.type = 'lowpass';
+        filter.frequency.value = timbre.filterFreq || 2000;
+        filter.Q.value = timbre.filterQ || 1;
+        osc.connect(filter);
+        filter.connect(env);
+        env.connect(track.gainNode);
+        osc.start(ctx.currentTime + startTime);
+        osc.stop(ctx.currentTime + startTime + duration + 0.01);
+    }
+
+    // ───────────────────── 音色控制 ─────────────────────
+    function setTrackTimbre(trackId, params) {
+        const track = getTrackById(trackId);
+        if (!track) return;
+        if (params.waveform) track.timbre.waveform = params.waveform;
+        if (params.attack !== undefined) track.timbre.attack = clamp(params.attack, 0, 2);
+        if (params.decay !== undefined) track.timbre.decay = clamp(params.decay, 0, 2);
+        if (params.sustain !== undefined) track.timbre.sustain = clamp(params.sustain, 0, 1);
+        if (params.release !== undefined) track.timbre.release = clamp(params.release, 0, 2);
+        if (params.filterFreq !== undefined) track.timbre.filterFreq = clamp(params.filterFreq, 20, 20000);
+        if (params.filterQ !== undefined) track.timbre.filterQ = clamp(params.filterQ, 0.1, 30);
+        if (params.pitchShift !== undefined) track.timbre.pitchShift = clamp(params.pitchShift, -24, 24);
+        if (params.swing !== undefined) track.timbre.swing = clamp(params.swing, 0, 1);
+        if (params.humanize !== undefined) track.timbre.humanize = clamp(params.humanize, 0, 0.1);
+    }
+
+    function getTrackTimbre(trackId) {
+        const track = getTrackById(trackId);
+        if (!track) return Object.assign({}, _defaultTimbre);
+        return Object.assign({}, track.timbre);
+    }
+
+    // ───────────────────── 节拍/律动控制 ─────────────────────
+    function setSwing(amount) {
+        _swing = clamp(amount, 0, 1);
+    }
+
+    function setHumanize(amount) {
+        _humanize = clamp(amount, 0, 0.1);
+    }
+
+    function quantizeNotes(trackId, gridValue) {
+        const gridMap = { '1/4': 1, '1/8': 0.5, '1/16': 0.25, '1/32': 0.125 };
+        const gridBeats = gridMap[gridValue];
+        if (!gridBeats) return;
+        const notes = _pianoRollNotes[trackId];
+        if (!notes) return;
+        const beatDur = 60 / _bpm;
+        const gridSec = gridBeats * beatDur;
+        notes.forEach(function(note) {
+            note.start = Math.round(note.start / gridSec) * gridSec;
+        });
+        if (_pianoRollVisible) renderPianoRoll();
+    }
+
+    function getGrooveSettings() {
+        return { swing: _swing, humanize: _humanize, quantizeValue: _quantizeValue };
+    }
+
     // ───────────────────── 返回公共接口 ─────────────────────
     return {
         init: init,
@@ -2158,5 +2652,29 @@ window.TrackEditor = (function () {
         exportState: exportState,
         importState: importState,
         resize: resize,
+        // 歌词
+        getLyrics: function(trackId) { return _lyrics[trackId || ''] || []; },
+        setLyrics: function(trackId, lyrics) { _lyrics[trackId] = lyrics; if (_lyricsVisible) renderLyricsPanel(); },
+        // 歌声合成
+        synthesizeVocals: synthesizeVocals,
+        playSynthNote: playSynthNote,
+        // 音色
+        setTrackTimbre: setTrackTimbre,
+        getTrackTimbre: getTrackTimbre,
+        // 节拍/律动
+        setSwing: setSwing,
+        setHumanize: setHumanize,
+        quantizeNotes: quantizeNotes,
+        getGrooveSettings: getGrooveSettings,
+        // BPM获取
+        getBPM: function() { return _bpm; },
+        // 录音
+        recordAudio: function() {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                if (window.showToast) window.showToast('浏览器不支持录音', 'error');
+                return;
+            }
+            record();
+        },
     };
 })();
