@@ -2,7 +2,7 @@
 # MusIDE IDE - Cross-platform one-line installer
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/ctz168/ide/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/ctz168/muside/main/install.sh | bash
 #
 # Works on: Termux, proot Ubuntu, Ubuntu/Debian, Fedora, CentOS, macOS, Alpine, Arch Linux
 # Installs: Python 3, pip, flask, flask-cors, clones repo, launches server
@@ -215,10 +215,10 @@ fi
 
 # ── Git clone with retry + mirror fallback ───────────
 CLONE_URLS=(
-    "https://github.com/ctz168/ide.git"
-    "https://ghfast.top/https://github.com/ctz168/ide.git"
-    "https://gh-proxy.com/https://github.com/ctz168/ide.git"
-    "https://mirror.ghproxy.com/https://github.com/ctz168/ide.git"
+    "https://github.com/ctz168/muside.git"
+    "https://ghfast.top/https://github.com/ctz168/muside.git"
+    "https://gh-proxy.com/https://github.com/ctz168/muside.git"
+    "https://mirror.ghproxy.com/https://github.com/ctz168/muside.git"
 )
 
 # ── Step 3/5: Clone repo ────────────────────────────
@@ -279,15 +279,15 @@ else
         fail "Last error: $(echo "$CLONE_ERR" | tail -3)"
         echo ""
         info "Try manually:"
-        echo -e "  ${CYAN}git clone https://github.com/ctz168/ide.git ~/muside-ide${NC}"
+        echo -e "  ${CYAN}git clone https://github.com/ctz168/muside.git ~/muside-ide${NC}"
         echo -e "  ${CYAN}cd ~/muside-ide && python3 muside_server.py${NC}"
         exit 1
     fi
 
     # Normalize remote to official GitHub (in case we cloned via mirror)
-    if [ "$url" != "https://github.com/ctz168/ide.git" ]; then
+    if [ "$url" != "https://github.com/ctz168/muside.git" ]; then
         cd "$INSTALL_DIR"
-        git remote set-url origin https://github.com/ctz168/ide.git 2>/dev/null || true
+        git remote set-url origin https://github.com/ctz168/muside.git 2>/dev/null || true
         info "Remote set to official GitHub URL"
     fi
 fi

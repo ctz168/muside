@@ -6,17 +6,17 @@
     Installs Python 3, pip dependencies, clones repo, starts server,
     checks port, opens browser. One command, ready to use.
 .EXAMPLE
-    irm https://raw.githubusercontent.com/ctz168/ide/main/install.ps1 | iex
+    irm https://raw.githubusercontent.com/ctz168/muside/main/install.ps1 | iex
 .EXAMPLE
-    $env:PHONEIDE_INSTALL_DIR="C:\my-ide"; irm https://raw.githubusercontent.com/ctz168/ide/main/install.ps1 | iex
+    $env:MUSIDE_INSTALL_DIR="C:\my-muside"; irm https://raw.githubusercontent.com/ctz168/muside/main/install.ps1 | iex
 #>
 
 $ErrorActionPreference = "SilentlyContinue"
 
 # ── Config ───────────────────────────────────────────────
-$RepoUrl = "https://github.com/ctz168/ide.git"
-$DefaultDir = "$env:USERPROFILE\phoneide-ide"
-$InstallDir = if ($env:PHONEIDE_INSTALL_DIR) { $env:PHONEIDE_INSTALL_DIR.Replace('~', $env:USERPROFILE) } else { $DefaultDir }
+$RepoUrl = "https://github.com/ctz168/muside.git"
+$DefaultDir = "$env:USERPROFILE\muside-ide"
+$InstallDir = if ($env:MUSIDE_INSTALL_DIR) { $env:MUSIDE_INSTALL_DIR.Replace('~', $env:USERPROFILE) } else { $DefaultDir }
 
 function Write-Info($msg)  { Write-Host "  [*] $msg" -ForegroundColor Blue }
 function Write-OK($msg)    { Write-Host "  [+] $msg" -ForegroundColor Green }
@@ -25,7 +25,7 @@ function Write-Fail($msg)  { Write-Host "  [-] $msg" -ForegroundColor Red }
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "       PhoneIDE IDE Installer" -ForegroundColor Cyan
+Write-Host "       MusIDE IDE Installer" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Info "Platform: Windows"
@@ -137,7 +137,7 @@ if ($LASTEXITCODE -eq 0) {
 
 # ── Step 3: Clone & setup ──────────────────────────────
 Write-Host ""
-Write-Host "[3/5] Setting up PhoneIDE IDE..." -ForegroundColor Blue
+Write-Host "[3/5] Setting up MusIDE IDE..." -ForegroundColor Blue
 
 if (Test-Path "$InstallDir\.git") {
     Write-Info "Updating existing installation..."
@@ -152,7 +152,7 @@ if (Test-Path "$InstallDir\.git") {
         Write-Warn "Using $InstallDir instead"
     }
 
-    Write-Info "Cloning ctz168/ide..."
+    Write-Info "Cloning ctz168/muside..."
 
     $git = Get-Command git -ErrorAction SilentlyContinue
     if (-not $git) {
@@ -171,10 +171,10 @@ if (Test-Path "$InstallDir\.git") {
 
     # Clone with mirror fallback (same as Linux install.sh)
     $CloneUrls = @(
-        "https://github.com/ctz168/ide.git",
-        "https://ghfast.top/https://github.com/ctz168/ide.git",
-        "https://gh-proxy.com/https://github.com/ctz168/ide.git",
-        "https://mirror.ghproxy.com/https://github.com/ctz168/ide.git"
+        "https://github.com/ctz168/muside.git",
+        "https://ghfast.top/https://github.com/ctz168/muside.git",
+        "https://gh-proxy.com/https://github.com/ctz168/muside.git",
+        "https://mirror.ghproxy.com/https://github.com/ctz168/muside.git"
     )
 
     $CloneOK = $false
@@ -197,22 +197,22 @@ if (Test-Path "$InstallDir\.git") {
         Write-Fail "All clone attempts failed - check your network"
         Write-Host ""
         Write-Host "Try manually:" -ForegroundColor Yellow
-        Write-Host "  git clone https://github.com/ctz168/ide.git $InstallDir" -ForegroundColor Cyan
+        Write-Host "  git clone https://github.com/ctz168/muside.git $InstallDir" -ForegroundColor Cyan
         exit 1
     }
 
     # Normalize remote to official GitHub (in case we cloned via mirror)
-    if ($url -ne "https://github.com/ctz168/ide.git") {
+    if ($url -ne "https://github.com/ctz168/muside.git") {
         Push-Location $InstallDir
-        git remote set-url origin https://github.com/ctz168/ide.git 2>$null
+        git remote set-url origin https://github.com/ctz168/muside.git 2>$null
         Pop-Location
         Write-Info "Remote set to official GitHub URL"
     }
 }
 
 # Create dirs
-New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\phoneide_workspace" | Out-Null
-New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.phoneide" | Out-Null
+New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\muside_workspace" | Out-Null
+New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.muside" | Out-Null
 
 Write-OK "Ready at $InstallDir"
 
@@ -255,9 +255,9 @@ try {
 
 # ── Step 5: Start server, check port, open browser ────
 Write-Host ""
-Write-Host "[5/5] Launching PhoneIDE IDE..." -ForegroundColor Blue
+Write-Host "[5/5] Launching MusIDE IDE..." -ForegroundColor Blue
 
-# Detect port from utils.py (respects PHONEIDE_PORT env var)
+# Detect port from utils.py (respects MUSIDE_PORT env var)
 Push-Location $InstallDir
 try {
     $DetectedPort = & $Python -c "import sys; sys.path.insert(0,'.'); from utils import PORT; print(PORT)" 2>$null
@@ -268,8 +268,8 @@ try {
     Pop-Location
 }
 
-if ($env:PHONEIDE_PORT) {
-    $DetectedPort = [int]$env:PHONEIDE_PORT
+if ($env:MUSIDE_PORT) {
+    $DetectedPort = [int]$env:MUSIDE_PORT
 }
 
 $IDE_PORT = $DetectedPort
@@ -314,7 +314,7 @@ Start-Job -ScriptBlock {
 # ── Done message ──────────────────────────────────────
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Green
-Write-Host "  PhoneIDE IDE is ready!" -ForegroundColor Green
+Write-Host "  MusIDE IDE is ready!" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Green
 Write-Host ""
 Write-Host "  Local:    $IDE_LOCAL" -ForegroundColor Cyan
