@@ -297,12 +297,16 @@ window.TrackEditor = (function () {
 
                     track.audioBuffers[clip.id] = buffer;
 
-                    // 上传文件到服务器持久化保存
-                    _uploadAudioToServer(file).then(function(serverPath) {
-                        if (serverPath) {
-                            clip.serverAudioPath = serverPath;
+                    // 上传文件到服务器持久化保存 + 自动分析（分轨 + 歌词识别）
+                    _uploadAudioToServer(file).then(function(uploadData) {
+                        if (uploadData && uploadData.path) {
+                            clip.serverAudioPath = uploadData.path;
                         }
                         autoSaveProject();
+                        // 自动触发智能分析（分轨 + 歌词识别）
+                        if (uploadData && uploadData.filename) {
+                            _startAudioAnalysis(uploadData.filename);
+                        }
                     }).catch(function(err) {
                         console.warn('Audio upload to server failed:', err);
                     });
@@ -330,7 +334,7 @@ window.TrackEditor = (function () {
                 return resp.json();
             }).then(function(data) {
                 if (data.ok && data.path) {
-                    resolve(data.path);
+                    resolve(data);
                 } else {
                     reject(new Error(data.error || 'Upload failed'));
                 }
@@ -338,6 +342,297 @@ window.TrackEditor = (function () {
                 reject(err);
             });
         });
+    }
+
+    // ───────────────────── 音频智能分析（分轨 + 歌词识别） ─────────────────────
+    let _analysisPollers = {};  // job_id -> intervalId
+    let _analysisToastShown = {};
+
+    function _showAnalysisToast(message, type) {
+        if (window.showToast) {
+            window.showToast(message, type || 'info');
+        }
+    }
+
+    function _startAudioAnalysis(serverFilename) {
+        // Trigger server-side stem separation + lyrics transcription
+        fetch('/api/audio/analyze', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                filename: serverFilename,
+                separate: true,
+                transcribe: true,
+            }),
+        }).then(function(resp) { return resp.json(); })
+          .then(function(data) {
+              if (!data.ok) {
+                  console.warn('[MusIDE] Analysis start failed:', data.error);
+                  return;
+              }
+
+              var sepJobId = data.separation_job_id;
+              var transJobId = data.transcription_job_id;
+              var serverFilename = data.filename;
+
+              // Handle existing stems
+              if (data.existing_stems && data.existing_stems.length > 0) {
+                  _applyStemsToEditor(serverFilename, data.existing_stems);
+              }
+
+              // Handle existing lyrics
+              if (data.existing_lyrics && data.existing_lyrics.length > 0) {
+                  _applyLyricsToEditor(serverFilename, data.existing_lyrics, data.lyrics_language);
+              }
+
+              // Poll separation job
+              if (sepJobId) {
+                  _showAnalysisToast('正在分轨处理，请稍候...', 'info');
+                  _pollAnalysisJob(sepJobId, 'separation', serverFilename);
+              }
+
+              // Poll transcription job
+              if (transJobId) {
+                  _showAnalysisToast('正在识别歌词，请稍候...', 'info');
+                  _pollAnalysisJob(transJobId, 'transcription', serverFilename);
+              }
+          })
+          .catch(function(err) {
+              console.warn('[MusIDE] Analysis request failed:', err);
+          });
+    }
+
+    function _pollAnalysisJob(jobId, jobType, serverFilename) {
+        if (_analysisPollers[jobId]) return; // Already polling
+
+        var pollInterval = setInterval(function() {
+            fetch('/api/audio/analyze_status?job_id=' + jobId)
+                .then(function(resp) { return resp.json(); })
+                .then(function(data) {
+                    if (!data.ok && data.error === 'Job not found') {
+                        clearInterval(pollInterval);
+                        delete _analysisPollers[jobId];
+                        _updateAnalysisBar(null);
+                        return;
+                    }
+
+                    var status = data.status;
+                    var progress = data.progress || 0;
+                    var message = data.message || '';
+
+                    // Update analysis progress bar
+                    _updateAnalysisBar({ progress: progress, message: message, type: jobType });
+
+                    if (status === 'separated' && jobType === 'separation') {
+                        clearInterval(pollInterval);
+                        delete _analysisPollers[jobId];
+                        // Apply stems to the editor
+                        if (data.result && data.result.stems) {
+                            _applyStemsToEditor(serverFilename, data.result.stems);
+                        }
+                        _showAnalysisToast('分轨完成！已自动创建各音轨', 'success');
+                        _updateAnalysisBar(null);
+                        autoSaveProject();
+                    } else if (status === 'transcribed' && jobType === 'transcription') {
+                        clearInterval(pollInterval);
+                        delete _analysisPollers[jobId];
+                        // Apply lyrics
+                        if (data.result && data.result.lyrics) {
+                            _applyLyricsToEditor(serverFilename, data.result.lyrics, data.result.language);
+                        }
+                        _showAnalysisToast('歌词识别完成！', 'success');
+                        _updateAnalysisBar(null);
+                        autoSaveProject();
+                    } else if (status === 'error') {
+                        clearInterval(pollInterval);
+                        delete _analysisPollers[jobId];
+                        _showAnalysisToast(message || '分析失败', 'error');
+                        _updateAnalysisBar(null);
+                    }
+                    // else: still in progress, keep polling
+                })
+                .catch(function(err) {
+                    console.warn('[MusIDE] Poll error:', err);
+                });
+        }, 2000); // Poll every 2 seconds
+
+        _analysisPollers[jobId] = pollInterval;
+    }
+
+    function _updateAnalysisBar(info) {
+        var bar = _els.analysisBar;
+        if (!bar) return;
+        if (!info) {
+            bar.classList.add('te-hidden');
+            return;
+        }
+        bar.classList.remove('te-hidden');
+        var fill = bar.querySelector('.te-analysis-fill');
+        var msg = bar.querySelector('.te-analysis-msg');
+        if (fill) fill.style.width = info.progress + '%';
+        if (msg) msg.textContent = info.message || '';
+    }
+
+    function _applyStemsToEditor(serverFilename, stems) {
+        // Create a new track for each stem and load the stem audio
+        var baseName = serverFilename.replace(/\.[^.]+$/, '');
+        var startTime = 0;
+
+        stems.forEach(function(stem) {
+            // Check if a track with this stem name already exists
+            var existingTrack = _tracks.find(function(t) {
+                return t.name === stem.name || t.name === _stemNameToChinese(stem.name);
+            });
+            if (existingTrack) {
+                // Track already exists, skip
+                return;
+            }
+
+            // Create a new track
+            var trackName = _stemNameToChinese(stem.name);
+            var track = createTrack(trackName);
+            if (!track) return;
+
+            // Set track color based on stem type
+            var stemColors = {
+                'vocals': '#e85db8',
+                'drums': '#e8853d',
+                'bass': '#5d9de8',
+                'other': '#6bc96b',
+            };
+            track.color = stemColors[stem.name] || track.color;
+
+            // Load the stem audio from server
+            var stemUrl = '/api/audio/stems/' + baseName + '/' + stem.filename;
+            _loadAudioBufferFromUrl(track, stemUrl, stem.name);
+        });
+
+        renderAll();
+    }
+
+    function _stemNameToChinese(name) {
+        var nameMap = {
+            'vocals': '人声',
+            'drums': '鼓组',
+            'bass': '贝斯',
+            'other': '伴奏',
+        };
+        return nameMap[name] || name;
+    }
+
+    function _loadAudioBufferFromUrl(track, url, clipName) {
+        var ctx = getAudioContext();
+        fetch(url)
+            .then(function(resp) {
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                return resp.arrayBuffer();
+            })
+            .then(function(arrayBuffer) {
+                return ctx.decodeAudioData(arrayBuffer);
+            })
+            .then(function(buffer) {
+                var pixPerBeat = PIXELS_PER_BEAT_BASE * _zoom;
+                var secPerPix = (60 / _bpm) / pixPerBeat;
+                var samplesPerPix = Math.max(1, Math.round(secPerPix * buffer.sampleRate));
+                var peaks = extractPeaks(buffer, samplesPerPix);
+
+                var clip = addClipToTrack(track.id, {
+                    startTime: 0,
+                    duration: buffer.duration,
+                    offset: 0,
+                    filePath: clipName,
+                    name: clipName,
+                    waveformPeaks: peaks,
+                    serverAudioPath: url,
+                });
+
+                track.audioBuffers[clip.id] = buffer;
+                renderAll();
+                autoSaveProject();
+            })
+            .catch(function(err) {
+                console.warn('[MusIDE] Failed to load stem audio:', url, err);
+            });
+    }
+
+    function _applyLyricsToEditor(serverFilename, lyricsLines, language) {
+        // Find the vocals track (or first track) and apply lyrics
+        var vocalsTrack = _tracks.find(function(t) { return t.name === '人声'; });
+        if (!vocalsTrack) vocalsTrack = _tracks[0];
+        if (!vocalsTrack) return;
+
+        _lyrics[vocalsTrack.id] = lyricsLines.map(function(line) {
+            return {
+                time: line.time || 0,
+                text: line.text || '',
+            };
+        });
+
+        // Show lyrics panel
+        _lyricsVisible = true;
+        if (_els.lyricsPanel) {
+            _els.lyricsPanel.classList.remove('te-hidden');
+        }
+        renderLyricsPanel();
+    }
+
+    function _showAnalyzeDialog() {
+        // Fetch audio library and show a dialog to select a file for analysis
+        fetch('/api/audio/list')
+            .then(function(resp) { return resp.json(); })
+            .then(function(data) {
+                var files = data.files || [];
+                if (files.length === 0) {
+                    if (window.showToast) window.showToast('音频库为空，请先导入音频文件', 'warning');
+                    return;
+                }
+
+                // Build a simple modal dialog
+                var overlay = document.createElement('div');
+                overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);z-index:10000;display:flex;align-items:center;justify-content:center;';
+
+                var dialog = document.createElement('div');
+                dialog.style.cssText = 'background:var(--bg-secondary,#231e17);border:1px solid var(--border,#3a3228);border-radius:8px;padding:16px;max-width:400px;width:90%;max-height:80vh;overflow-y:auto;color:var(--text-primary,#f5f0eb);font-size:13px;';
+
+                var html = '<div style="font-weight:600;margin-bottom:12px;">智能分析 - 选择音频文件</div>';
+                html += '<div style="font-size:11px;color:var(--text-muted,#7d7068);margin-bottom:8px;">将自动分离人声/鼓组/贝斯/伴奏，并识别歌词</div>';
+                files.forEach(function(f) {
+                    var sizeKB = Math.round(f.size / 1024);
+                    var stemStatus = f.has_stems ? ' <span style="color:#6bc96b;">已分轨</span>' : '';
+                    var lyricsStatus = f.has_lyrics ? ' <span style="color:#5d9de8;">已识别歌词</span>' : '';
+                    html += '<div class="te-analyze-file-item" data-filename="' + f.filename + '" style="padding:8px;border:1px solid var(--border,#3a3228);border-radius:4px;margin-bottom:4px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;">';
+                    html += '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + f.filename + '</span>';
+                    html += '<span style="font-size:10px;color:var(--text-muted,#7d7068);flex-shrink:0;margin-left:8px;">' + sizeKB + 'KB' + stemStatus + lyricsStatus + '</span>';
+                    html += '</div>';
+                });
+                html += '<div style="text-align:right;margin-top:12px;"><button id="te-analyze-cancel" style="padding:4px 12px;border:1px solid var(--border,#3a3228);background:var(--bg-surface,#2d2620);color:var(--text-secondary,#b5a898);border-radius:4px;font-size:11px;cursor:pointer;">取消</button></div>';
+
+                dialog.innerHTML = html;
+                overlay.appendChild(dialog);
+                document.body.appendChild(overlay);
+
+                // Bind events
+                overlay.addEventListener('click', function(e) {
+                    if (e.target === overlay) {
+                        document.body.removeChild(overlay);
+                    }
+                });
+                dialog.querySelector('#te-analyze-cancel').addEventListener('click', function() {
+                    document.body.removeChild(overlay);
+                });
+                dialog.querySelectorAll('.te-analyze-file-item').forEach(function(item) {
+                    item.addEventListener('click', function() {
+                        var filename = this.getAttribute('data-filename');
+                        document.body.removeChild(overlay);
+                        if (filename) {
+                            _startAudioAnalysis(filename);
+                        }
+                    });
+                });
+            })
+            .catch(function(err) {
+                console.warn('[MusIDE] Failed to load audio library:', err);
+            });
     }
 
     // ───────────────────── 项目持久化 ─────────────────────
@@ -857,6 +1152,12 @@ window.TrackEditor = (function () {
         mainArea.appendChild(contentCol);
         _container.appendChild(mainArea);
 
+        // 分析进度条
+        const analysisBar = document.createElement('div');
+        analysisBar.className = 'te-analysis-bar te-hidden';
+        analysisBar.innerHTML = '<div class="te-analysis-progress"><div class="te-analysis-fill"></div></div><span class="te-analysis-msg"></span>';
+        _container.appendChild(analysisBar);
+
         // 混音器面板 (可切换)
         const mixerPanel = document.createElement('div');
         mixerPanel.className = 'te-mixer-panel te-hidden';
@@ -882,6 +1183,7 @@ window.TrackEditor = (function () {
             timelineCanvas,
             lanesContainer,
             lanesCanvas,
+            analysisBar,
             mixerPanel,
             pianoRollPanel,
             lyricsPanel,
@@ -911,6 +1213,7 @@ window.TrackEditor = (function () {
             '<button class="te-btn te-btn-zoom-in" title="放大">+</button>' +
             '<button class="te-btn te-btn-zoom-out" title="缩小">−</button>' +
             '<button class="te-btn te-btn-add-track" title="添加轨道">+</button>' +
+            '<button class="te-btn te-btn-analyze" title="智能分析（分轨+歌词）">🧠</button>' +
             '<button class="te-btn te-btn-mixer" title="混音器">🎛</button>' +
             '<button class="te-btn te-btn-piano" title="钢琴卷帘">🎹</button>' +
             '<button class="te-btn te-btn-lyrics" title="歌词">📝</button>' +
@@ -932,6 +1235,7 @@ window.TrackEditor = (function () {
         const zoomIn = t.querySelector('.te-btn-zoom-in');
         const zoomOut = t.querySelector('.te-btn-zoom-out');
         const addTrackBtn = t.querySelector('.te-btn-add-track');
+        const analyzeBtn = t.querySelector('.te-btn-analyze');
         const mixerBtn = t.querySelector('.te-btn-mixer');
         const pianoBtn = t.querySelector('.te-btn-piano');
         const bpmInput = t.querySelector('.te-bpm-input');
@@ -967,6 +1271,10 @@ window.TrackEditor = (function () {
             if (track) {
                 renderAll();
             }
+        });
+        if (analyzeBtn) analyzeBtn.addEventListener('click', function () {
+            // Manual analyze: show a dialog to pick from audio library
+            _showAnalyzeDialog();
         });
         mixerBtn.addEventListener('click', function () {
             _mixerVisible = !_mixerVisible;
@@ -2511,6 +2819,43 @@ window.TrackEditor = (function () {
     display: block;
 }
 
+/* 分析进度条 */
+.te-analysis-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 12px;
+    background: var(--bg-secondary, #231e17);
+    border-top: 1px solid var(--border, #3a3228);
+    height: 28px;
+    flex-shrink: 0;
+}
+.te-analysis-bar.te-hidden {
+    display: none;
+}
+.te-analysis-progress {
+    flex: 1;
+    height: 6px;
+    background: var(--bg-tertiary, #16120d);
+    border-radius: 3px;
+    overflow: hidden;
+    max-width: 300px;
+}
+.te-analysis-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent, #e8853d), #e8c45d);
+    border-radius: 3px;
+    transition: width 0.5s ease;
+    width: 0%;
+}
+.te-analysis-msg {
+    font-size: 10px;
+    color: var(--text-muted, #7d7068);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 /* 混音器面板 */
 .te-mixer-panel {
     height: 240px;
@@ -2780,36 +3125,79 @@ window.TrackEditor = (function () {
     function renderLyricsPanel() {
         const panel = _els.lyricsPanel;
         if (!panel) return;
-        const trackId = _tracks.length > 0 ? _tracks[0].id : null;
+        // Default to vocals track, then first track
+        let trackId = null;
+        const vocalsTrack = _tracks.find(function(t) { return t.name === '人声'; });
+        if (vocalsTrack) trackId = vocalsTrack.id;
+        else if (_tracks.length > 0) trackId = _tracks[0].id;
         const lyrics = trackId ? (_lyrics[trackId] || []) : [];
         let html = '<div style="padding:8px;font-size:12px;color:var(--text-primary);">';
         html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">';
-        html += '<span style="font-weight:600;">📝 歌词编辑</span>';
+        html += '<span style="font-weight:600;">歌词</span>';
         if (_tracks.length > 0) {
             html += '<select id="te-lyrics-track-select" style="flex:1;padding:2px 6px;border-radius:4px;background:var(--bg-tertiary);color:var(--text-primary);border:1px solid var(--border);font-size:11px;">';
             _tracks.forEach(function(t) {
-                html += '<option value="' + t.id + '"' + (t.id === trackId ? ' selected' : '') + '>' + t.name + '</option>';
+                html += '<option value="' + t.id + '"' + (t.id === trackId ? ' selected' : '') + '>' + escapeHtml(t.name) + '</option>';
             });
             html += '</select>';
         }
         html += '</div>';
-        html += '<textarea id="te-lyrics-editor" style="width:100%;height:300px;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border);border-radius:4px;padding:8px;font-size:12px;font-family:var(--font-mono);resize:vertical;" placeholder="每行格式: [MM:SS] 歌词文本&#10;例: [00:05] 第一句歌词&#10;[00:10] 第二句歌词">';
+        // Show lyrics with timestamps - nicer format for recognized lyrics
+        if (lyrics.length > 0) {
+            html += '<div id="te-lyrics-display" style="background:var(--bg-primary);border:1px solid var(--border);border-radius:4px;padding:8px;max-height:260px;overflow-y:auto;margin-bottom:6px;">';
+            lyrics.forEach(function(line, idx) {
+                const m = Math.floor(line.time / 60);
+                const s = Math.floor(line.time % 60);
+                const ms = Math.floor((line.time % 1) * 100);
+                html += '<div class="te-lyrics-line" data-idx="' + idx + '" style="display:flex;gap:6px;padding:2px 0;border-bottom:1px solid rgba(255,255,255,0.05);cursor:pointer;" data-time="' + line.time + '">';
+                html += '<span style="color:var(--accent);font-family:var(--font-mono);font-size:10px;flex-shrink:0;min-width:55px;">' + String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0') + '.' + String(ms).padStart(2,'0') + '</span>';
+                html += '<span style="flex:1;">' + escapeHtml(line.text) + '</span>';
+                html += '</div>';
+            });
+            html += '</div>';
+        }
+        html += '<textarea id="te-lyrics-editor" style="width:100%;height:120px;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border);border-radius:4px;padding:8px;font-size:12px;font-family:var(--font-mono);resize:vertical;display:none;" placeholder="每行格式: [MM:SS.ss] 歌词文本&#10;例: [00:05.50] 第一句歌词&#10;[00:10.20] 第二句歌词">';
         lyrics.forEach(function(line) {
             const m = Math.floor(line.time / 60);
             const s = Math.floor(line.time % 60);
-            html += '[' + String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0') + '] ' + line.text + '\n';
+            const ms = Math.floor((line.time % 1) * 100);
+            html += '[' + String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0') + '.' + String(ms).padStart(2,'0') + '] ' + line.text + '\n';
         });
         html += '</textarea>';
         html += '<div style="display:flex;gap:6px;margin-top:6px;">';
-        html += '<button id="te-lyrics-apply" style="flex:1;padding:4px;border:none;background:var(--accent);color:#fff;border-radius:4px;font-size:11px;cursor:pointer;">应用歌词</button>';
+        html += '<button id="te-lyrics-apply" style="flex:1;padding:4px;border:none;background:var(--accent);color:#fff;border-radius:4px;font-size:11px;cursor:pointer;display:none;">应用歌词</button>';
+        html += '<button id="te-lyrics-edit" style="flex:1;padding:4px;border:1px solid var(--accent);background:transparent;color:var(--accent);border-radius:4px;font-size:11px;cursor:pointer;">编辑</button>';
         html += '<button id="te-lyrics-clear" style="padding:4px 8px;border:1px solid var(--border);background:var(--bg-surface);color:var(--text-secondary);border-radius:4px;font-size:11px;cursor:pointer;">清空</button>';
         html += '</div></div>';
         panel.innerHTML = html;
         // Bind events
         const applyBtn = document.getElementById('te-lyrics-apply');
+        const editBtn = document.getElementById('te-lyrics-edit');
         const clearBtn = document.getElementById('te-lyrics-clear');
         const trackSelect = document.getElementById('te-lyrics-track-select');
         const editor = document.getElementById('te-lyrics-editor');
+        const display = document.getElementById('te-lyrics-display');
+
+        // Click on lyrics line to seek
+        if (display) {
+            display.addEventListener('click', function(e) {
+                var line = e.target.closest('.te-lyrics-line');
+                if (line) {
+                    var time = parseFloat(line.getAttribute('data-time'));
+                    if (isFinite(time)) seek(time);
+                }
+            });
+        }
+
+        if (editBtn) editBtn.addEventListener('click', function() {
+            if (editor) {
+                var visible = editor.style.display !== 'none';
+                editor.style.display = visible ? 'none' : 'block';
+                if (applyBtn) applyBtn.style.display = visible ? 'none' : 'block';
+                if (display) display.style.display = visible ? 'block' : 'none';
+                editBtn.textContent = visible ? '编辑' : '取消编辑';
+            }
+        });
         if (applyBtn) applyBtn.addEventListener('click', function() {
             const tid = trackSelect ? trackSelect.value : trackId;
             if (!tid) return;
@@ -2817,28 +3205,51 @@ window.TrackEditor = (function () {
             const lines = text.split('\n');
             const parsed = [];
             lines.forEach(function(line) {
-                const match = line.match(/\[(\d{2}):(\d{2})\]\s*(.+)/);
+                // Support [MM:SS.ss] format
+                const match = line.match(/\[(\d{2}):(\d{2})(?:\.(\d{2}))?\]\s*(.+)/);
                 if (match) {
-                    parsed.push({ time: parseInt(match[1]) * 60 + parseInt(match[2]), text: match[3].trim() });
+                    var time = parseInt(match[1]) * 60 + parseInt(match[2]);
+                    if (match[3]) time += parseInt(match[3]) / 100;
+                    parsed.push({ time: time, text: match[4].trim() });
                 }
             });
             parsed.sort(function(a, b) { return a.time - b.time; });
             _lyrics[tid] = parsed;
+            renderLyricsPanel();
         });
         if (clearBtn) clearBtn.addEventListener('click', function() {
-            if (editor) editor.value = '';
             const tid = trackSelect ? trackSelect.value : trackId;
             if (tid) _lyrics[tid] = [];
+            renderLyricsPanel();
         });
         if (trackSelect) trackSelect.addEventListener('change', function() {
             const tid = this.value;
             const l = _lyrics[tid] || [];
+            // Re-render with selected track
+            const selTrackId = tid;
+            const selLyrics = l;
             if (editor) {
                 editor.value = '';
-                l.forEach(function(line) {
+                selLyrics.forEach(function(line) {
                     const m = Math.floor(line.time / 60);
                     const s = Math.floor(line.time % 60);
-                    editor.value += '[' + String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0') + '] ' + line.text + '\n';
+                    const ms = Math.floor((line.time % 1) * 100);
+                    editor.value += '[' + String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0') + '.' + String(ms).padStart(2,'0') + '] ' + line.text + '\n';
+                });
+            }
+            if (display) {
+                display.innerHTML = '';
+                selLyrics.forEach(function(line, idx) {
+                    const m = Math.floor(line.time / 60);
+                    const s = Math.floor(line.time % 60);
+                    const ms = Math.floor((line.time % 1) * 100);
+                    var div = document.createElement('div');
+                    div.className = 'te-lyrics-line';
+                    div.setAttribute('data-idx', idx);
+                    div.setAttribute('data-time', line.time);
+                    div.style.cssText = 'display:flex;gap:6px;padding:2px 0;border-bottom:1px solid rgba(255,255,255,0.05);cursor:pointer;';
+                    div.innerHTML = '<span style="color:var(--accent);font-family:var(--font-mono);font-size:10px;flex-shrink:0;min-width:55px;">' + String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0') + '.' + String(ms).padStart(2,'0') + '</span><span style="flex:1;">' + escapeHtml(line.text) + '</span>';
+                    display.appendChild(div);
                 });
             }
         });
