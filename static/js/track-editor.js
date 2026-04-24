@@ -848,11 +848,52 @@ window.TrackEditor = (function () {
         handleLanesPointerDown(x, y);
     }
     function onLanesTouchStart(e) {
-        e.preventDefault();
-        const rect = _els.lanesCanvas.getBoundingClientRect();
-        const x = e.touches[0].clientX - rect.left;
-        const y = e.touches[0].clientY - rect.top;
-        handleLanesPointerDown(x, y);
+        // Don't preventDefault immediately — allow native scrolling to work.
+        // Only prevent and handle when user taps on a clip (drag interaction).
+        if (isMobileView()) {
+            // In mobile segment mode, let native scroll work unless tapping on a clip
+            const rect = _els.lanesCanvas.getBoundingClientRect();
+            const x = e.touches[0].clientX - rect.left;
+            const y = e.touches[0].clientY - rect.top;
+            const pixPerBeat = pixelsPerBeat();
+            const containerW = _els.lanesContainer.clientWidth;
+            const segmentBeats = containerW / pixPerBeat;
+            const segmentDuration = (segmentBeats * 60) / _bpm;
+            if (segmentDuration <= 0) return;
+            const totalDuration = getDuration();
+            const numSegments = Math.max(1, Math.ceil(totalDuration / segmentDuration));
+            const segmentLabelHeight = 22;
+            const segmentHeight = _tracks.length * TRACK_LANE_HEIGHT + segmentLabelHeight;
+            const segIdx = Math.floor(y / segmentHeight);
+            if (segIdx < 0 || segIdx >= numSegments) return;
+            const segStart = segIdx * segmentDuration;
+            const localY = y - segIdx * segmentHeight - segmentLabelHeight;
+            const trackIdx = Math.floor(localY / TRACK_LANE_HEIGHT);
+            if (trackIdx < 0 || trackIdx >= _tracks.length) return;
+            const track = _tracks[trackIdx];
+            const clickTime = segStart + (x / containerW) * segmentDuration;
+            // Only prevent scroll if user tapped on an actual clip
+            let clickedClip = null;
+            for (let i = track.clips.length - 1; i >= 0; i--) {
+                const clip = track.clips[i];
+                if (clickTime >= clip.startTime && clickTime <= clip.startTime + clip.duration) {
+                    clickedClip = clip;
+                    break;
+                }
+            }
+            if (clickedClip) {
+                e.preventDefault();
+                handleLanesPointerDown(x, y);
+            }
+            // Otherwise: don't prevent — allow native scrolling
+        } else {
+            // Desktop touch (touchscreen monitor): original behavior
+            e.preventDefault();
+            const rect = _els.lanesCanvas.getBoundingClientRect();
+            const x = e.touches[0].clientX - rect.left;
+            const y = e.touches[0].clientY - rect.top;
+            handleLanesPointerDown(x, y);
+        }
     }
 
     function handleLanesPointerDown(x, y) {
@@ -1026,18 +1067,31 @@ window.TrackEditor = (function () {
 
     // 滚轮缩放和滚动
     function onLanesWheel(e) {
-        e.preventDefault();
         if (e.ctrlKey || e.metaKey) {
             // 缩放
+            e.preventDefault();
             const factor = e.deltaY < 0 ? 1.1 : 0.9;
             _zoom = clamp(_zoom * factor, 0.1, 10);
             renderAll();
         } else if (e.shiftKey) {
             // 水平滚动
+            e.preventDefault();
             _scrollX = Math.max(0, _scrollX + e.deltaY);
             renderAll();
+        } else if (isMobileView()) {
+            // Mobile segment mode: canvas is tall, let native scroll work
+            // But also update _scrollY for playhead tracking
+            // Don't preventDefault — let the container scroll natively
+            requestAnimationFrame(function() {
+                var cont = _els.lanesContainer;
+                if (cont) {
+                    _scrollY = cont.scrollTop;
+                    renderAll();
+                }
+            });
         } else {
-            // 垂直滚动
+            // Desktop mode: manual vertical scroll via _scrollY
+            e.preventDefault();
             _scrollY = Math.max(0, _scrollY + e.deltaY);
             renderAll();
         }
