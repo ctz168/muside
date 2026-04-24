@@ -176,4 +176,8 @@ if __name__ == '__main__':
     # Git init is now handled per-project via the Project panel
     log_write(f'[SERVER] Starting on {HOST}:{PORT}, workspace: {WORKSPACE}')
 
+    # Suppress Werkzeug's per-request log lines (e.g. "GET /api/browser/poll HTTP/1.1" 200)
+    import logging
+    logging.getLogger('werkzeug').setLevel(logging.WARNING)
+
     app.run(host=HOST, port=PORT, debug=False, threaded=True)
