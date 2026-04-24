@@ -1099,17 +1099,20 @@ const AppManager = (() => {
 
     // ── Toolbar Buttons ──
     function initToolbar() {
-        // Undo
-        document.getElementById('btn-undo').addEventListener('click', () => {
+        // Undo (may not exist in MusIDE layout)
+        const undoBtn = document.getElementById('btn-undo');
+        if (undoBtn) undoBtn.addEventListener('click', () => {
             if (window.EditorManager) EditorManager.undo();
         });
-        // Redo
-        document.getElementById('btn-redo').addEventListener('click', () => {
+        // Redo (may not exist in MusIDE layout)
+        const redoBtn = document.getElementById('btn-redo');
+        if (redoBtn) redoBtn.addEventListener('click', () => {
             if (window.EditorManager) EditorManager.redo();
         });
         // Run
         const runBtn = document.getElementById('btn-run');
 
+        if (runBtn) {
         // Long-press / Right-click on run button → show run file menu
         let _runBtnLongPressTimer = null;
         let _runBtnLongPressed = false;
@@ -1167,6 +1170,7 @@ const AppManager = (() => {
                 }
             }
         });
+        } // end if (runBtn)
         // Stop — stops both AI task and terminal process
         document.getElementById('btn-stop').addEventListener('click', async () => {
             // 1. Stop AI agent task
@@ -1590,7 +1594,6 @@ const AppManager = (() => {
         const origKeyHandler = document.onkeydown;
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
-                if (logViewerOpen) toggleLogViewer();
                 const updateDialog = document.getElementById('update-dialog-overlay');
                 if (updateDialog && !updateDialog.classList.contains('hidden')) {
                     updateDialog.classList.add('hidden');
@@ -2234,17 +2237,7 @@ const AppManager = (() => {
             // Load chat history
             if (window.ChatManager) await ChatManager.loadHistory();
 
-            // Wire up toolbar settings button - use ChatManager's full settings dialog
-            const toolbarSettingsBtn = document.getElementById('btn-settings');
-            if (toolbarSettingsBtn && window.ChatManager && ChatManager.showSettingsDialog) {
-                const openSettings = () => {
-                    ChatManager.showSettingsDialog().catch(err => {
-                        console.error('[MusIDE] Settings dialog error:', err);
-                        showToast('设置对话框打开失败: ' + err.message, 'error');
-                    });
-                };
-                bindTouchButton(toolbarSettingsBtn, openSettings);
-            }
+            // Settings button removed from toolbar — use the ⚙️ button in the chat sidebar header instead
 
             showToast('MusIDE 就绪', 'success', 1500);
             console.log('[MusIDE] Ready!');
@@ -2329,7 +2322,7 @@ const AppManager = (() => {
 
     return {
         init, showToast, showDialog, showPromptDialog, showConfirmDialog, showInputDialog,
-        restartServer, toggleLogViewer, checkUpdates, applyUpdate, pollServerStatus
+        restartServer, checkUpdates, applyUpdate, pollServerStatus
     };
 })();
 

@@ -70,7 +70,7 @@ const ChatManager = (() => {
         'set_timbre', 'get_timbre',
         // Beat Control tools
         'set_swing', 'quantize', 'set_humanize',
-    };
+    ];
 
     const TOOL_ICONS = {
         read_file:     '📖',
@@ -4045,14 +4045,6 @@ Do NOT execute any tools. Only generate the plan.\n\nUser request: `;
                     console.error('ChatManager: settings dialog error:', err);
                 });
             });
-            // Also handle touchend for mobile
-            settingsBtn.addEventListener('touchend', (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                showSettingsDialog().catch(err => {
-                    console.error('ChatManager: settings dialog touch error:', err);
-                });
-            }, { passive: false });
         }
 
         function toggleSearchBar() {
