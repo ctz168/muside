@@ -347,6 +347,7 @@ window.TrackEditor = (function () {
     // ───────────────────── 音频智能分析（分轨 + 歌词识别） ─────────────────────
     let _analysisPollers = {};  // job_id -> intervalId
     let _analysisToastShown = {};
+    let _serverCapabilities = null;  // cached capabilities from server
 
     function _showAnalysisToast(message, type) {
         if (window.showToast) {
@@ -354,52 +355,90 @@ window.TrackEditor = (function () {
         }
     }
 
+    function _checkCapabilities() {
+        // Fetch and cache server capabilities (which analysis features are available)
+        if (_serverCapabilities) return Promise.resolve(_serverCapabilities);
+        return fetch('/api/audio/capabilities')
+            .then(function(resp) { return resp.json(); })
+            .then(function(data) {
+                if (data.ok) {
+                    _serverCapabilities = data;
+                }
+                return data;
+            })
+            .catch(function(err) {
+                console.warn('[MusIDE] Capabilities check failed:', err);
+                return { ok: false, can_separate: false, can_transcribe: false };
+            });
+    }
+
     function _startAudioAnalysis(serverFilename) {
-        // Trigger server-side stem separation + lyrics transcription
-        fetch('/api/audio/analyze', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                filename: serverFilename,
-                separate: true,
-                transcribe: true,
-            }),
-        }).then(function(resp) { return resp.json(); })
-          .then(function(data) {
-              if (!data.ok) {
-                  console.warn('[MusIDE] Analysis start failed:', data.error);
-                  return;
-              }
+        // Check capabilities first, then trigger analysis
+        _checkCapabilities().then(function(caps) {
+            var canSep = caps.can_separate;
+            var canTrans = caps.can_transcribe;
 
-              var sepJobId = data.separation_job_id;
-              var transJobId = data.transcription_job_id;
-              var serverFilename = data.filename;
+            if (!canSep && !canTrans) {
+                var missing = [];
+                if (caps.missing_for_separation && caps.missing_for_separation.length > 0) {
+                    missing.push('分轨: ' + caps.missing_for_separation.join(', '));
+                }
+                if (caps.missing_for_transcription && caps.missing_for_transcription.length > 0) {
+                    missing.push('歌词识别: ' + caps.missing_for_transcription.join(', '));
+                }
+                var hint = caps.install_hint || 'pip install openai-whisper torch torchaudio demucs';
+                _showAnalysisToast('智能分析功能不可用，缺少依赖: ' + missing.join('; ') + '。请运行: ' + hint, 'error');
+                return;
+            }
 
-              // Handle existing stems
-              if (data.existing_stems && data.existing_stems.length > 0) {
-                  _applyStemsToEditor(serverFilename, data.existing_stems);
-              }
+            // Trigger server-side stem separation + lyrics transcription
+            fetch('/api/audio/analyze', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    filename: serverFilename,
+                    separate: canSep,
+                    transcribe: canTrans,
+                }),
+            }).then(function(resp) { return resp.json(); })
+              .then(function(data) {
+                  if (!data.ok) {
+                      console.warn('[MusIDE] Analysis start failed:', data.error);
+                      _showAnalysisToast(data.error || '分析启动失败', 'error');
+                      return;
+                  }
 
-              // Handle existing lyrics
-              if (data.existing_lyrics && data.existing_lyrics.length > 0) {
-                  _applyLyricsToEditor(serverFilename, data.existing_lyrics, data.lyrics_language);
-              }
+                  var sepJobId = data.separation_job_id;
+                  var transJobId = data.transcription_job_id;
+                  var sf = data.filename;
 
-              // Poll separation job
-              if (sepJobId) {
-                  _showAnalysisToast('正在分轨处理，请稍候...', 'info');
-                  _pollAnalysisJob(sepJobId, 'separation', serverFilename);
-              }
+                  // Handle existing stems
+                  if (data.existing_stems && data.existing_stems.length > 0) {
+                      _applyStemsToEditor(sf, data.existing_stems);
+                  }
 
-              // Poll transcription job
-              if (transJobId) {
-                  _showAnalysisToast('正在识别歌词，请稍候...', 'info');
-                  _pollAnalysisJob(transJobId, 'transcription', serverFilename);
-              }
-          })
-          .catch(function(err) {
-              console.warn('[MusIDE] Analysis request failed:', err);
-          });
+                  // Handle existing lyrics
+                  if (data.existing_lyrics && data.existing_lyrics.length > 0) {
+                      _applyLyricsToEditor(sf, data.existing_lyrics, data.lyrics_language);
+                  }
+
+                  // Poll separation job
+                  if (sepJobId) {
+                      _showAnalysisToast('正在分轨处理，请稍候...', 'info');
+                      _pollAnalysisJob(sepJobId, 'separation', sf);
+                  }
+
+                  // Poll transcription job
+                  if (transJobId) {
+                      _showAnalysisToast('正在识别歌词，请稍候...', 'info');
+                      _pollAnalysisJob(transJobId, 'transcription', sf);
+                  }
+              })
+              .catch(function(err) {
+                  console.warn('[MusIDE] Analysis request failed:', err);
+                  _showAnalysisToast('分析请求失败: ' + err.message, 'error');
+              });
+        });
     }
 
     function _pollAnalysisJob(jobId, jobType, serverFilename) {
@@ -577,25 +616,49 @@ window.TrackEditor = (function () {
     }
 
     function _showAnalyzeDialog() {
-        // Fetch audio library and show a dialog to select a file for analysis
-        fetch('/api/audio/list')
-            .then(function(resp) { return resp.json(); })
-            .then(function(data) {
-                var files = data.files || [];
-                if (files.length === 0) {
-                    if (window.showToast) window.showToast('音频库为空，请先导入音频文件', 'warning');
-                    return;
-                }
+        // Check capabilities first, then fetch audio library
+        _checkCapabilities().then(function(caps) {
+            var canSep = caps.can_separate;
+            var canTrans = caps.can_transcribe;
+            var hasAny = canSep || canTrans;
 
-                // Build a simple modal dialog
-                var overlay = document.createElement('div');
-                overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);z-index:10000;display:flex;align-items:center;justify-content:center;';
+            fetch('/api/audio/list')
+                .then(function(resp) { return resp.json(); })
+                .then(function(data) {
+                    var files = data.files || [];
+                    if (files.length === 0) {
+                        if (window.showToast) window.showToast('音频库为空，请先导入音频文件', 'warning');
+                        return;
+                    }
 
-                var dialog = document.createElement('div');
-                dialog.style.cssText = 'background:var(--bg-secondary,#231e17);border:1px solid var(--border,#3a3228);border-radius:8px;padding:16px;max-width:400px;width:90%;max-height:80vh;overflow-y:auto;color:var(--text-primary,#f5f0eb);font-size:13px;';
+                    // Build a simple modal dialog
+                    var overlay = document.createElement('div');
+                    overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);z-index:10000;display:flex;align-items:center;justify-content:center;';
 
-                var html = '<div style="font-weight:600;margin-bottom:12px;">智能分析 - 选择音频文件</div>';
-                html += '<div style="font-size:11px;color:var(--text-muted,#7d7068);margin-bottom:8px;">将自动分离人声/鼓组/贝斯/伴奏，并识别歌词</div>';
+                    var dialog = document.createElement('div');
+                    dialog.style.cssText = 'background:var(--bg-secondary,#231e17);border:1px solid var(--border,#3a3228);border-radius:8px;padding:16px;max-width:400px;width:90%;max-height:80vh;overflow-y:auto;color:var(--text-primary,#f5f0eb);font-size:13px;';
+
+                    var html = '<div style="font-weight:600;margin-bottom:12px;">智能分析 - 选择音频文件</div>';
+
+                    if (!hasAny) {
+                        // Show missing dependency warning
+                        var missing = [];
+                        if (caps.missing_for_separation && caps.missing_for_separation.length > 0) {
+                            missing.push('分轨: ' + caps.missing_for_separation.join(', '));
+                        }
+                        if (caps.missing_for_transcription && caps.missing_for_transcription.length > 0) {
+                            missing.push('歌词识别: ' + caps.missing_for_transcription.join(', '));
+                        }
+                        html += '<div style="font-size:11px;color:#e85d5d;margin-bottom:8px;padding:6px;border:1px solid #e85d5d33;border-radius:4px;">';
+                        html += '缺少依赖: ' + missing.join('; ');
+                        html += '<br>请运行: <code style="background:var(--bg-surface,#2d2620);padding:2px 4px;border-radius:2px;font-size:10px;">' + (caps.install_hint || 'pip install openai-whisper torch torchaudio demucs') + '</code>';
+                        html += '</div>';
+                    } else {
+                        var features = [];
+                        if (canSep) features.push('分轨');
+                        if (canTrans) features.push('歌词识别');
+                        html += '<div style="font-size:11px;color:var(--text-muted,#7d7068);margin-bottom:8px;">可用功能: ' + features.join(' + ') + '</div>';
+                    }
                 files.forEach(function(f) {
                     var sizeKB = Math.round(f.size / 1024);
                     var stemStatus = f.has_stems ? ' <span style="color:#6bc96b;">已分轨</span>' : '';
@@ -633,6 +696,7 @@ window.TrackEditor = (function () {
             .catch(function(err) {
                 console.warn('[MusIDE] Failed to load audio library:', err);
             });
+        });
     }
 
     // ───────────────────── 项目持久化 ─────────────────────

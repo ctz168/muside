@@ -20,6 +20,66 @@ from utils import handle_error, CONFIG_DIR
 
 bp = Blueprint('audio', __name__)
 
+# ── Dependency Check (lazy, at module load time) ──
+_capabilities = {
+    'demucs': False,
+    'whisper': False,
+    'torch': False,
+    'torchaudio': False,
+}
+
+try:
+    import torch
+    _capabilities['torch'] = True
+except ImportError:
+    pass
+
+try:
+    import torchaudio
+    _capabilities['torchaudio'] = True
+except ImportError:
+    pass
+
+try:
+    from demucs.pretrained import get_model
+    _capabilities['demucs'] = True
+except ImportError:
+    pass
+
+try:
+    import whisper
+    _capabilities['whisper'] = True
+except ImportError:
+    pass
+
+# Log capabilities at startup
+from utils import log_write
+_avail = [k for k, v in _capabilities.items() if v]
+_missing = [k for k, v in _capabilities.items() if not v]
+log_write(f'[MusIDE] Audio analysis capabilities - available: {_avail}, missing: {_missing}')
+if _missing:
+    log_write(f'[MusIDE] To enable all features, run: pip install openai-whisper torch torchaudio demucs')
+
+
+@bp.route('/api/audio/capabilities', methods=['GET'])
+@handle_error
+def get_capabilities():
+    """Check which audio analysis features are available on this server."""
+    return jsonify({
+        'ok': True,
+        'capabilities': _capabilities,
+        'can_separate': _capabilities['demucs'] and _capabilities['torch'] and _capabilities['torchaudio'],
+        'can_transcribe': _capabilities['whisper'] and _capabilities['torch'],
+        'missing_for_separation': [] if (_capabilities['demucs'] and _capabilities['torch'] and _capabilities['torchaudio']) else [
+            p for p in ['torch', 'torchaudio', 'demucs'] if not _capabilities[p]
+        ],
+        'missing_for_transcription': [] if (_capabilities['whisper'] and _capabilities['torch']) else [
+            p for p in ['torch', 'whisper'] if not _capabilities[p]
+        ],
+        'install_hint': 'pip install openai-whisper torch torchaudio demucs',
+    })
+
+
 # ── Audio Library ──
 AUDIO_LIBRARY_DIR = os.path.join(CONFIG_DIR, 'audio_library')
 STEMS_DIR = os.path.join(AUDIO_LIBRARY_DIR, 'stems')
@@ -150,11 +210,20 @@ def _run_stem_separation(job_id, audio_path, model='htdemucs'):
             _analysis_jobs[job_id]['status'] = 'separating'
             _analysis_jobs[job_id]['message'] = 'Loading Demucs model...'
 
-        import torch
-        from demucs.pretrained import get_model
-        from demucs.apply import apply_model
-        import torchaudio
-        import numpy as np
+        try:
+            import torch
+            from demucs.pretrained import get_model
+            from demucs.apply import apply_model
+            import torchaudio
+            import numpy as np
+        except ImportError as ie:
+            missing = []
+            if 'torch' in str(ie): missing.append('torch')
+            if 'demucs' in str(ie): missing.append('demucs')
+            if 'torchaudio' in str(ie): missing.append('torchaudio')
+            if not missing: missing.append(str(ie).split()[-1] if ie else 'unknown')
+            pkg_list = ', '.join(missing)
+            raise ImportError(f'分轨所需依赖未安装: {pkg_list}。请运行: pip install torch torchaudio demucs')
 
         # Load the model
         log_write(f'[MusIDE] Loading Demucs model: {model}')
@@ -265,7 +334,10 @@ def _run_lyrics_transcription(job_id, audio_path, language=None):
             _analysis_jobs[job_id]['status'] = 'transcribing'
             _analysis_jobs[job_id]['message'] = 'Loading Whisper model...'
 
-        import whisper
+        try:
+            import whisper
+        except ImportError:
+            raise ImportError('歌词识别所需依赖未安装: whisper。请运行: pip install openai-whisper torch')
 
         # Use 'base' model for speed, can be configured
         model_size = 'base'
@@ -365,6 +437,19 @@ def analyze_audio():
     do_transcribe = data.get('transcribe', True)
     model = data.get('model', 'htdemucs')
     language = data.get('language', None)
+
+    # Check capabilities before attempting analysis
+    errors = []
+    if do_separate and not (_capabilities['demucs'] and _capabilities['torch'] and _capabilities['torchaudio']):
+        missing = [p for p in ['torch', 'torchaudio', 'demucs'] if not _capabilities[p]]
+        errors.append(f'分轨功能不可用，缺少依赖: {", ".join(missing)}。请运行: pip install torch torchaudio demucs')
+        do_separate = False
+    if do_transcribe and not (_capabilities['whisper'] and _capabilities['torch']):
+        missing = [p for p in ['torch', 'whisper'] if not _capabilities[p]]
+        errors.append(f'歌词识别功能不可用，缺少依赖: {", ".join(missing)}。请运行: pip install openai-whisper torch')
+        do_transcribe = False
+    if errors and not do_separate and not do_transcribe:
+        return jsonify({'ok': False, 'error': '\n'.join(errors), 'capabilities': _capabilities}), 400
 
     # Check existing results
     base_name = os.path.splitext(safe_name)[0]

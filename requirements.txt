@@ -6,3 +6,10 @@ tree-sitter-python>=0.23.0
 tree-sitter-javascript>=0.23.0
 tree-sitter-typescript>=0.23.0
 tree-sitter-go>=0.23.0
+
+# Optional: Audio Analysis (smart stem separation + lyrics transcription)
+# Uncomment or install manually for full MusIDE audio analysis features:
+# torch>=2.0.0
+# torchaudio>=2.0.0
+# demucs>=4.0.0
+# openai-whisper>=20230314
